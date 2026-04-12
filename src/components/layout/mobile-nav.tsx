@@ -10,6 +10,7 @@ import {
   CalendarDays,
   ShoppingCart,
   ChefHat,
+  Settings,
 } from "lucide-react";
 
 const navItems = [
@@ -17,6 +18,7 @@ const navItems = [
   { href: "/recipes", label: "Recipes", icon: BookOpen },
   { href: "/meal-plan", label: "Plan", icon: CalendarDays },
   { href: "/shopping-list", label: "Shop", icon: ShoppingCart },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function MobileNav() {
