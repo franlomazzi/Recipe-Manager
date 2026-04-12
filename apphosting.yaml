@@ -1,0 +1,7 @@
+# Firebase App Hosting configuration file.
+# Learn more: https://firebase.google.com/docs/app-hosting/configure-apphosting
+
+specVersion: v1
+
+buildConfig:
+  runtime: nodejs22
