@@ -22,3 +22,6 @@ env:
   - variable: NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
     value: "G-FLCMR1RQW6"
     availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_APP_ENV
+    value: "production"
+    availability: [BUILD, RUNTIME]

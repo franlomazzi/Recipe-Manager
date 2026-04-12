@@ -1,9 +1,11 @@
 import type { MetadataRoute } from "next";
 
+const isDev = process.env.NEXT_PUBLIC_APP_ENV === "development";
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "My Recipe Manager",
-    short_name: "Recipes",
+    name: isDev ? "My Recipes (dev)" : "My Recipes",
+    short_name: isDev ? "Recipes (dev)" : "Recipes",
     description: "Your personal recipe collection, meal planner, and shopping list",
     start_url: "/dashboard",
     display: "standalone",
