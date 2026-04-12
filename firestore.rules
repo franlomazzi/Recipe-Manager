@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Households — two real users sharing a kitchen
+    match /households/{householdId} {
+      // Read: must be a member, OR be looking up by invite code (we allow read so
+      // joinHouseholdByCode's `where("inviteCode","==",code)` query can succeed).
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.members.size() == 1
+        && request.resource.data.members[0] == request.auth.uid;
+
+      // Update path 1: existing member updating the household.
+      // Update path 2: a non-member joining via invite code (members grows by 1
+      // to include the caller, code stays the same, ownerId unchanged).
+      allow update: if request.auth != null && (
+        request.auth.uid in resource.data.members
+        || (
+          resource.data.members.size() < 2
+          && request.resource.data.inviteCode == resource.data.inviteCode
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.auth.uid in request.resource.data.members
+          && request.resource.data.members.size() == resource.data.members.size() + 1
+        )
+      );
+
+      allow delete: if request.auth != null
+        && request.auth.uid == resource.data.ownerId;
+
+      match /pantryState/{docId} {
+        allow read, write: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/households/$(householdId)).data.members;
+      }
+    }
+
+    // Legacy recipes collection (kept for reference, data migrated to nutrition_meals)
+    match /recipes/{recipeId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+
+      match /versions/{versionId} {
+        allow read, write: if request.auth != null
+          && get(/databases/$(database)/documents/recipes/$(recipeId)).data.userId == request.auth.uid;
+      }
+
+      match /cookLogs/{logId} {
+        allow read, write: if request.auth != null
+          && get(/databases/$(database)/documents/recipes/$(recipeId)).data.userId == request.auth.uid;
+      }
+    }
+
+    // Shared nutrition_meals collection (used by both Recipe Manager and Food Tracking apps)
+    // NOTE: The food tracking app's firestore.rules already covers the base nutrition_meals/{mealId}
+    // rule. These subcollection rules must be merged into the food tracking app's rules file
+    // before deploying. Do NOT deploy this file standalone — it would overwrite the food tracking rules.
+    //
+    // READ: own docs OR docs flagged householdShared (any signed-in user can read shared
+    // recipes by id; ids are UUIDs and there's no list path for shared recipes that's
+    // exposed in the client, so the exposure is acceptable for v1).
+    // WRITE: only the creator (userId == auth.uid). Recipe Manager enforces "creator-only edits"
+    // in the UI as well.
+    match /nutrition_meals/{mealId} {
+      allow read: if request.auth != null
+        && (resource == null
+            || resource.data.userId == request.auth.uid
+            || resource.data.householdShared == true);
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+
+      match /versions/{versionId} {
+        allow read, write: if request.auth != null
+          && get(/databases/$(database)/documents/nutrition_meals/$(mealId)).data.userId == request.auth.uid;
+      }
+
+      // Cook logs — both household members can log cooks against shared recipes
+      // under their own uid. Read access mirrors the parent doc.
+      match /cookLogs/{logId} {
+        allow read: if request.auth != null
+          && (get(/databases/$(database)/documents/nutrition_meals/$(mealId)).data.userId == request.auth.uid
+              || get(/databases/$(database)/documents/nutrition_meals/$(mealId)).data.householdShared == true);
+        allow create: if request.auth != null
+          && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if request.auth != null
+          && resource.data.userId == request.auth.uid;
+      }
+    }
+
+    // Shared plan templates (used by both Recipe Manager and Food Tracking apps)
+    match /nutrition_plan_templates/{templateId} {
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Shared plan instances (used by both Recipe Manager and Food Tracking apps)
+    match /nutrition_plan_instances/{instanceId} {
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Shared ingredient library (used by both Recipe Manager and Food Tracking apps)
+    // Reads are open to any signed-in user so Recipe Manager can merge two
+    // household members' libraries client-side.
+    match /nutrition_ingredients/{ingredientId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    match /mealPlans/{planId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    // Shopping locations and ingredient categories — per-user docs that
+    // Recipe Manager merges across household members client-side.
+    match /shoppingLocations/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /ingredientCategories/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Per-user shopping lists. Doc id is the bare userId.
+    match /shoppingLists/{listId} {
+      allow read, write: if request.auth != null
+        && (resource == null || resource.data.userId == request.auth.uid
+            || (request.resource != null && request.resource.data.userId == request.auth.uid));
+    }
+  }
+}

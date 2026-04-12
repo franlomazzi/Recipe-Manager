@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Recipe Manager — Offline</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0f0d0b;
+      color: #f5f0eb;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100dvh;
+      margin: 0;
+      gap: 16px;
+      text-align: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    img { width: 80px; height: 80px; border-radius: 20px; }
+    h1 { font-size: 1.25rem; margin: 0; }
+    p { color: #a89a8a; margin: 0; font-size: 0.9rem; }
+    button {
+      margin-top: 8px;
+      padding: 12px 24px;
+      background: #C9651A;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <img src="/icons/icon-192x192.png" alt="My Recipe Manager" />
+  <h1>You're offline</h1>
+  <p>Check your connection and try again.</p>
+  <button onclick="location.reload()">Retry</button>
+</body>
+</html>

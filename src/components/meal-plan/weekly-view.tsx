@@ -1,0 +1,608 @@
+"use client";
+
+import { useState, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useRecipes } from "@/lib/hooks/use-recipes";
+import {
+  updateInstanceDay,
+  getIndicesForDate,
+} from "@/lib/firebase/meal-plans";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  Plus,
+  X,
+  Pencil,
+  MoreVertical,
+  LayoutTemplate,
+  Square,
+  Loader2,
+  Minus,
+} from "lucide-react";
+import { MealPickerDialog } from "./meal-picker-dialog";
+import { addDays, format, parseISO, isToday } from "date-fns";
+import type { PlanInstance, PlanMeal, PlanDay } from "@/lib/types/meal-plan";
+import { MEAL_CATEGORIES, DAYS_OF_WEEK } from "@/lib/types/meal-plan";
+
+interface WeeklyViewProps {
+  instance: PlanInstance;
+  onShowTemplates: () => void;
+  onEndPlan: () => void;
+  endingPlan: boolean;
+}
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  Breakfast: "🌅",
+  Lunch: "☀️",
+  Dinner: "🌙",
+  Snacks: "🍿",
+};
+
+export function WeeklyView({
+  instance,
+  onShowTemplates,
+  onEndPlan,
+  endingPlan,
+}: WeeklyViewProps) {
+  const router = useRouter();
+  const { recipes } = useRecipes();
+  const [weekOffset, setWeekOffset] = useState(() => {
+    const indices = getIndicesForDate(instance, new Date());
+    return indices?.weekIndex ?? 0;
+  });
+
+  // Mobile: selected day index
+  const todayIndices = getIndicesForDate(instance, new Date());
+  const [selectedDay, setSelectedDay] = useState(
+    todayIndices?.weekIndex === weekOffset ? (todayIndices?.dayIndex ?? 0) : 0
+  );
+
+  // Meal picker state
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerTarget, setPickerTarget] = useState<{
+    dayIndex: number;
+    category: string;
+  } | null>(null);
+
+  const currentWeek = instance.snapshot[weekOffset];
+  const planStart = parseISO(instance.startDate);
+
+  // Preload all meal photos across the entire plan so navigating between weeks
+  // and returning to this page uses the browser cache instead of re-fetching.
+  useEffect(() => {
+    const urls = new Set<string>();
+    for (const week of instance.snapshot) {
+      for (const day of week.days) {
+        for (const meal of day.meals) {
+          if (meal.mealPhoto) urls.add(meal.mealPhoto);
+        }
+      }
+    }
+    for (const url of urls) {
+      const img = new window.Image();
+      img.src = url;
+    }
+  }, [instance]);
+
+  const weekDates = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, i) =>
+        addDays(planStart, weekOffset * 7 + i)
+      ),
+    [planStart, weekOffset]
+  );
+
+  const cookableIds = useMemo(
+    () => new Set(recipes.filter((r) => r.steps.length > 0).map((r) => r.id)),
+    [recipes]
+  );
+
+  const recipeServings = useMemo(
+    () => new Map(recipes.map((r) => [r.id, r.servings])),
+    [recipes]
+  );
+
+  // Servings dialog state
+  const [cookTarget, setCookTarget] = useState<{ mealId: string; defaultServings: number } | null>(null);
+  const [cookServings, setCookServings] = useState(1);
+
+  function getMeal(dayIndex: number, category: string): PlanMeal | undefined {
+    return currentWeek?.days[dayIndex]?.meals.find(
+      (m) => m.category === category
+    );
+  }
+
+  function openPicker(dayIndex: number, category: string) {
+    setPickerTarget({ dayIndex, category });
+    setPickerOpen(true);
+  }
+
+  async function handleMealSelect(meal: PlanMeal) {
+    if (!pickerTarget || !currentWeek) return;
+    const { dayIndex, category } = pickerTarget;
+    const day = currentWeek.days[dayIndex];
+    const updatedDay: PlanDay = {
+      meals: [...day.meals.filter((m) => m.category !== category), meal],
+    };
+    await updateInstanceDay(instance.id, weekOffset, dayIndex, updatedDay);
+  }
+
+  async function removeMeal(dayIndex: number, category: string) {
+    if (!currentWeek) return;
+    const day = currentWeek.days[dayIndex];
+    const updatedDay: PlanDay = {
+      meals: day.meals.filter((m) => m.category !== category),
+    };
+    await updateInstanceDay(instance.id, weekOffset, dayIndex, updatedDay);
+  }
+
+  function launchCook(mealId: string) {
+    const defaultServings = recipeServings.get(mealId) ?? 1;
+    setCookServings(defaultServings);
+    setCookTarget({ mealId, defaultServings });
+  }
+
+  if (!currentWeek) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-muted-foreground">
+          No data for this week
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const currentMealId = pickerTarget
+    ? getMeal(pickerTarget.dayIndex, pickerTarget.category)?.mealId
+    : undefined;
+
+  return (
+    <>
+      <div className="flex flex-col flex-1 min-h-0">
+        {/* ─── Compact control bar ─── */}
+        <div className="flex items-center gap-2 mb-2 shrink-0">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm md:text-base font-semibold truncate">
+              {instance.templateName}
+            </h2>
+          </div>
+
+          {/* Week nav */}
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={weekOffset === 0}
+              onClick={() => {
+                setWeekOffset((i) => i - 1);
+                setSelectedDay(0);
+              }}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <span className="text-xs font-medium min-w-[56px] text-center text-muted-foreground">
+              {weekOffset + 1}/{instance.snapshot.length}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={weekOffset >= instance.snapshot.length - 1}
+              onClick={() => {
+                setWeekOffset((i) => i + 1);
+                setSelectedDay(0);
+              }}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {/* Menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="ghost" size="icon" className="h-7 w-7" />
+              }
+            >
+              <MoreVertical className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onShowTemplates}>
+                <LayoutTemplate className="mr-2 h-4 w-4" />
+                Templates
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={onEndPlan}
+                disabled={endingPlan}
+                className="text-destructive focus:text-destructive"
+              >
+                {endingPlan ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="mr-2 h-4 w-4" />
+                )}
+                End Plan
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* ─── MOBILE: Day selector + meal cards ─── */}
+        <div className="md:hidden flex flex-col flex-1 min-h-0 space-y-2">
+          {/* Day pills */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 shrink-0">
+            {DAYS_OF_WEEK.map((day, idx) => {
+              const date = weekDates[idx];
+              const today = isToday(date);
+              const hasMeals = (currentWeek.days[idx]?.meals.length ?? 0) > 0;
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  className={`flex flex-col items-center rounded-xl px-3 py-2 transition-colors shrink-0 min-w-[50px] ${
+                    selectedDay === idx
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : today
+                        ? "bg-primary/10 text-primary"
+                        : "bg-muted/50 text-foreground"
+                  }`}
+                  onClick={() => setSelectedDay(idx)}
+                >
+                  <span className="text-[11px] font-medium">
+                    {day.slice(0, 3)}
+                  </span>
+                  <span
+                    className={`text-lg font-bold leading-tight ${
+                      selectedDay === idx
+                        ? "text-primary-foreground"
+                        : today
+                          ? "text-primary"
+                          : ""
+                    }`}
+                  >
+                    {format(date, "d")}
+                  </span>
+                  {hasMeals && selectedDay !== idx && (
+                    <div className="h-1.5 w-1.5 rounded-full bg-primary mt-0.5" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Meal cards */}
+          <div className="flex-1 overflow-y-auto space-y-2">
+            {MEAL_CATEGORIES.map((category) => {
+              const meal = getMeal(selectedDay, category);
+              const cookable = meal ? cookableIds.has(meal.mealId) : false;
+              return (
+                <MobileMealCard
+                  key={category}
+                  category={category}
+                  meal={meal}
+                  cookable={cookable}
+                  onTap={() => openPicker(selectedDay, category)}
+                  onCook={() => meal && launchCook(meal.mealId)}
+                  onRemove={() => removeMeal(selectedDay, category)}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ─── TABLET / DESKTOP: Row-per-category grid ─── */}
+        <div className="hidden md:flex md:flex-col flex-1 min-h-0 gap-1 lg:gap-1.5">
+          {/* Day header row */}
+          <div className="grid gap-1 lg:gap-1.5 shrink-0" style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
+            <div />
+            {DAYS_OF_WEEK.map((day, idx) => {
+              const date = weekDates[idx];
+              const today = isToday(date);
+              return (
+                <div
+                  key={day}
+                  className={`text-center py-1 rounded-lg ${
+                    today ? "bg-primary text-primary-foreground" : "bg-muted/60"
+                  }`}
+                >
+                  <span className={`text-[11px] font-medium ${today ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                    {day.slice(0, 3)}
+                  </span>{" "}
+                  <span className="text-sm font-bold">{format(date, "d")}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* One row per meal category */}
+          {MEAL_CATEGORIES.map((category) => (
+            <div
+              key={category}
+              className="grid flex-1 min-h-0 gap-1 lg:gap-1.5 2xl:max-h-[160px]"
+              style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}
+            >
+              {/* Row label */}
+              <div className="flex flex-col items-center justify-center gap-1 border-r-4 border-border pr-1">
+                <span className="text-lg">{CATEGORY_EMOJI[category]}</span>
+                <span className="text-[11px] lg:text-xs font-bold text-muted-foreground text-center leading-none">
+                  {category}
+                </span>
+              </div>
+
+              {/* 7 day cells */}
+              {DAYS_OF_WEEK.map((_, dayIdx) => {
+                const meal = getMeal(dayIdx, category);
+                const cookable = meal ? cookableIds.has(meal.mealId) : false;
+                return (
+                  <GridCell
+                    key={dayIdx}
+                    meal={meal}
+                    cookable={cookable}
+                    onTap={() => openPicker(dayIdx, category)}
+                    onCook={() => meal && launchCook(meal.mealId)}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <MealPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        category={pickerTarget?.category ?? ""}
+        recipes={recipes}
+        onSelect={handleMealSelect}
+        onRemove={
+          pickerTarget
+            ? () => {
+                removeMeal(pickerTarget.dayIndex, pickerTarget.category);
+                setPickerOpen(false);
+              }
+            : undefined
+        }
+        currentMealId={currentMealId}
+      />
+
+      {/* Servings picker dialog */}
+      {cookTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border-transparent bg-card shadow-2xl">
+            <div className="px-6 pt-6 pb-2">
+              <h3 className="text-lg font-semibold">How many servings?</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Quantities will be scaled to your chosen amount.
+              </p>
+            </div>
+            <div className="px-6 py-4 flex items-center justify-center gap-4">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 rounded-xl"
+                onClick={() => setCookServings((s) => Math.max(0.5, s - 0.5))}
+                disabled={cookServings <= 0.5}
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+              <div className="text-center min-w-[100px]">
+                <span className="text-3xl font-bold">{cookServings}</span>
+                <p className="text-sm text-muted-foreground">
+                  servings
+                  {cookServings === cookTarget.defaultServings && (
+                    <span className="ml-1 text-primary font-medium">(default)</span>
+                  )}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 rounded-xl"
+                onClick={() => setCookServings((s) => s + 0.5)}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex gap-2 px-6 pb-6 pt-2">
+              <Button
+                variant="outline"
+                className="flex-1 rounded-xl"
+                onClick={() => setCookTarget(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 rounded-xl"
+                onClick={() => {
+                  const { mealId } = cookTarget;
+                  setCookTarget(null);
+                  router.push(`/recipes/${mealId}/cook?servings=${cookServings}`);
+                }}
+              >
+                <Play className="mr-2 h-4 w-4" />
+                Start cooking
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Desktop/tablet: photo-background cell ───
+
+function GridCell({
+  meal,
+  cookable,
+  onTap,
+  onCook,
+}: {
+  meal: PlanMeal | undefined;
+  cookable: boolean;
+  onTap: () => void;
+  onCook: () => void;
+}) {
+  if (!meal) {
+    return (
+      <button
+        type="button"
+        className="flex-1 flex items-center justify-center rounded-lg border-2 border-dashed border-border/40 transition-colors hover:border-primary/40 hover:bg-muted/30 min-h-0"
+        onClick={onTap}
+      >
+        <Plus className="h-4 w-4 text-muted-foreground/30" />
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="group flex-1 flex flex-col 2xl:flex-row rounded-lg overflow-hidden cursor-pointer min-h-0 border border-border/40 bg-card hover:border-primary/40 hover:shadow-sm transition-all"
+      onClick={onTap}
+    >
+      {/* Photo — 65% height in column mode, fixed width in row mode */}
+      <div className="relative shrink-0 h-[65%] 2xl:h-full 2xl:w-[120px] overflow-hidden">
+        {meal.mealPhoto ? (
+          <img
+            src={meal.mealPhoto}
+            alt={meal.mealName}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="h-full w-full flex items-center justify-center bg-gradient-to-br from-muted/60 to-muted p-2">
+            <p className="text-center text-[9px] lg:text-[11px] font-semibold text-foreground/60 line-clamp-3 leading-snug">
+              {meal.mealName}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Name + play */}
+      <div className="flex items-center gap-1 flex-1 px-1.5 min-h-0 2xl:flex-col 2xl:items-start 2xl:justify-center 2xl:gap-1.5 2xl:px-2 2xl:py-1.5">
+        <p
+          className="flex-1 2xl:flex-none text-[10px] lg:text-xs font-semibold leading-tight line-clamp-2 text-foreground min-w-0 2xl:w-full"
+          title={meal.mealName}
+        >
+          {meal.mealName}
+        </p>
+        {cookable && (
+          <button
+            type="button"
+            className="shrink-0 flex h-6 w-6 lg:h-7 lg:w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 hover:scale-105 transition-all shadow-sm"
+            onClick={(e) => { e.stopPropagation(); onCook(); }}
+            title="Start cooking"
+          >
+            <Play className="h-3 w-3 lg:h-3.5 lg:w-3.5 ml-px" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Mobile meal card ───
+
+function MobileMealCard({
+  category,
+  meal,
+  cookable,
+  onTap,
+  onCook,
+  onRemove,
+}: {
+  category: string;
+  meal: PlanMeal | undefined;
+  cookable: boolean;
+  onTap: () => void;
+  onCook: () => void;
+  onRemove: () => void;
+}) {
+  const emoji = CATEGORY_EMOJI[category] ?? "";
+
+  if (!meal) {
+    return (
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 rounded-xl border-2 border-dashed border-border/50 p-3 text-left transition-colors hover:border-primary/40 hover:bg-muted/30"
+        onClick={onTap}
+      >
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-muted shrink-0">
+          <Plus className="h-5 w-5 text-muted-foreground/50" />
+        </div>
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">
+            {emoji} {category}
+          </p>
+          <p className="text-sm text-muted-foreground/60">Add a meal</p>
+        </div>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm">
+      {/* Photo */}
+      {meal.mealPhoto ? (
+        <img
+          src={meal.mealPhoto}
+          alt=""
+          className="h-14 w-14 rounded-lg object-cover shrink-0"
+        />
+      ) : (
+        <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-muted/60 to-muted shrink-0 p-1.5">
+          <p className="text-[9px] font-semibold text-foreground/50 text-center line-clamp-3 leading-snug">
+            {meal.mealName}
+          </p>
+        </div>
+      )}
+
+      {/* Text */}
+      <div className="flex-1 min-w-0" onClick={onTap}>
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          {emoji} {category}
+        </p>
+        <p className="text-sm font-semibold truncate">{meal.mealName}</p>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-1 shrink-0">
+        {cookable && (
+          <Button
+            variant="default"
+            size="icon"
+            className="h-9 w-9 rounded-full"
+            onClick={onCook}
+          >
+            <Play className="h-4 w-4 ml-0.5" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground"
+          onClick={onTap}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+          onClick={onRemove}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
