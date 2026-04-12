@@ -32,7 +32,11 @@ export async function signInWithGoogle(key?: AccountKey) {
  */
 export async function signInWithGoogleSecondary() {
   const bundle = ensureSecondaryApp();
-  const result = await signInWithPopup(bundle.auth, googleProvider);
+  // Force the account picker so the user can choose a *different* Google
+  // account. Without this, mobile browsers silently reuse the active account.
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  const result = await signInWithPopup(bundle.auth, provider);
   // Use the secondary app's Firestore instance so the write is
   // authenticated as the secondary user, not the primary.
   await ensureUserProfile(result.user, bundle.db);
