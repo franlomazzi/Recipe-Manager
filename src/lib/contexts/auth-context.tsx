@@ -9,6 +9,7 @@ import {
 } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getAuth } from "@/lib/firebase/config";
+import { loadUnitStandards } from "@/lib/unit-standards";
 import { useActiveAccount } from "./active-account-context";
 
 interface AuthContextValue {
@@ -28,8 +29,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setLoading(true);
-    const unsubscribe = onAuthStateChanged(getAuth(activeKey), (u) => {
+    const unsubscribe = onAuthStateChanged(getAuth(activeKey), async (u) => {
       setUser(u);
+      // Prime the shared unit-standards cache once per sign-in so the recipe
+      // form and shopping list have canonical unit data on first paint. Fire
+      // and forget — loadUnitStandards falls back to bundled defaults on any
+      // error, so we don't block the auth flow on it.
+      if (u) {
+        loadUnitStandards(u.uid).catch(() => {
+          /* handled inside loadUnitStandards */
+        });
+      }
       setLoading(false);
     });
     return unsubscribe;

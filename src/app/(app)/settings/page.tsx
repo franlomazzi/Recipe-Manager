@@ -7,6 +7,7 @@ import { Settings } from "lucide-react";
 import { ShoppingOrganizationManager } from "@/components/settings/shopping-organization-manager";
 import { HouseholdManager } from "@/components/settings/household-manager";
 import { MultiAccountManager } from "@/components/settings/multi-account-manager";
+import { UnitStandardsManager } from "@/components/settings/unit-standards-manager";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -48,6 +49,8 @@ export default function SettingsPage() {
       <MultiAccountManager />
 
       <ShoppingOrganizationManager />
+
+      <UnitStandardsManager />
     </div>
   );
 }

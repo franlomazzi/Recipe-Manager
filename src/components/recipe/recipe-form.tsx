@@ -13,6 +13,8 @@ import { uploadRecipeImage } from "@/lib/firebase/storage";
 import { generateSearchTerms } from "@/lib/utils/ingredient-parser";
 import { detectTimer } from "@/lib/utils/timer-detector";
 import { guessIngredientCategory } from "@/lib/utils/category-mapper";
+import { normalizeUnit } from "@/lib/unit-standards";
+import { UnitCombobox } from "@/components/recipe/unit-combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,7 +40,9 @@ import {
   Lightbulb,
   Star,
   ShoppingBasket,
+  Sparkles,
 } from "lucide-react";
+import { generateRecipeImage } from "@/lib/services/gemini-service";
 import { toast } from "sonner";
 import type { Recipe, Ingredient, Step, StepIngredient, Difficulty, CookLog, LibraryIngredient } from "@/lib/types/recipe";
 import { RECIPE_CATEGORIES, CUISINE_TAGS, DIET_TAGS } from "@/lib/types/recipe";
@@ -87,8 +91,16 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
   const [difficulty, setDifficulty] = useState<Difficulty>(recipe?.difficulty || "medium");
   const [categories, setCategories] = useState<string[]>(recipe?.categories || []);
   const [notes, setNotes] = useState(recipe?.notes || "");
+  // Silent-normalize any legacy free-text units on form init so the Unit
+  // dropdown shows the canonical value from first paint. Persistence only
+  // happens when the user saves, so unopened recipes remain untouched.
   const [ingredients, setIngredients] = useState<Ingredient[]>(
-    recipe?.ingredients?.length ? recipe.ingredients : [createEmptyIngredient()]
+    recipe?.ingredients?.length
+      ? recipe.ingredients.map((ing) => ({
+          ...ing,
+          unit: normalizeUnit(ing.unit),
+        }))
+      : [createEmptyIngredient()]
   );
   const [steps, setSteps] = useState<Step[]>(
     recipe?.steps?.length ? recipe.steps : [createEmptyStep(1)]
@@ -96,6 +108,9 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(recipe?.photoURL || null);
   const [saving, setSaving] = useState(false);
+  const [aiPromptOpen, setAiPromptOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [generatingPhoto, setGeneratingPhoto] = useState(false);
 
   function toggleCategory(cat: string) {
     setCategories((prev) =>
@@ -113,6 +128,33 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
   function removeImage() {
     setImageFile(null);
     setImagePreview(null);
+  }
+
+  async function handleGenerateAiPhoto() {
+    if (!title.trim()) {
+      toast.error("Add a recipe title first so the AI knows what to draw.");
+      return;
+    }
+    setGeneratingPhoto(true);
+    try {
+      const blob = await generateRecipeImage(title.trim(), aiPrompt.trim() || undefined);
+      // Wrap the blob in a File so the existing save flow (which expects a
+      // File for compressImage + uploadRecipeImage) handles it unchanged.
+      const fileName = `${title.trim().toLowerCase().replace(/\s+/g, "-")}-ai.jpg`;
+      const file = new File([blob], fileName, { type: "image/jpeg" });
+      // Revoke any previous object URL we created so we don't leak.
+      if (imagePreview && imagePreview.startsWith("blob:")) {
+        URL.revokeObjectURL(imagePreview);
+      }
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(blob));
+      setAiPromptOpen(false);
+      toast.success("AI photo ready — save the recipe to keep it.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't generate photo");
+    } finally {
+      setGeneratingPhoto(false);
+    }
   }
 
   function updateIngredient(index: number, field: keyof Ingredient, value: string | number | null) {
@@ -528,6 +570,52 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
                 />
               </label>
             )}
+
+            {/* AI photo generator */}
+            <div className="w-full max-w-sm space-y-2 pt-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateAiPhoto}
+                  disabled={generatingPhoto || !title.trim()}
+                  className="gap-1.5"
+                >
+                  {generatingPhoto ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4 text-primary" />
+                  )}
+                  {imagePreview ? "Regenerate AI Photo" : "Generate AI Photo"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAiPromptOpen((open) => !open)}
+                  disabled={generatingPhoto}
+                  className="text-xs text-muted-foreground"
+                >
+                  {aiPromptOpen ? "Hide custom prompt" : "Add custom prompt"}
+                </Button>
+              </div>
+              {aiPromptOpen && (
+                <Textarea
+                  placeholder="Optional: describe the shot you want — e.g. 'rustic wooden table, soft morning light, top-down view'"
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  rows={2}
+                  disabled={generatingPhoto}
+                  className="text-sm"
+                />
+              )}
+              {!title.trim() && (
+                <p className="text-xs text-muted-foreground">
+                  Add a recipe title to enable AI photo generation.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Categories */}
@@ -574,11 +662,10 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
                     )
                   }
                 />
-                <Input
+                <UnitCombobox
                   className="col-span-2"
-                  placeholder="Unit"
                   value={ing.unit}
-                  onChange={(e) => updateIngredient(index, "unit", e.target.value)}
+                  onValueChange={(v) => updateIngredient(index, "unit", v)}
                 />
                 <IngredientCombobox
                   className="col-span-2 sm:col-span-5"

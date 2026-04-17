@@ -7,6 +7,7 @@ import { useActivePlan } from "./use-active-plan";
 import { useIngredientLibrary } from "./use-ingredient-library";
 import { useHouseholdPantryState } from "./use-household-pantry-state";
 import { subscribeToShoppingListState } from "@/lib/firebase/shopping-list";
+import { normalizeUnit } from "@/lib/unit-standards";
 import type { Recipe, IngredientCategory, LibraryIngredient } from "@/lib/types/recipe";
 import type {
   ShoppingItem,
@@ -18,7 +19,9 @@ import type { OneOffMeta } from "@/lib/types/shopping-organization";
 import type { PlanInstance } from "@/lib/types/meal-plan";
 
 function itemKey(name: string, unit: string): string {
-  return `${name.trim().toLowerCase()}|${unit.trim().toLowerCase()}`;
+  // Normalize the unit segment so legacy recipes with "grams" group with
+  // current recipes using "g". See src/lib/unit-standards.ts.
+  return `${name.trim().toLowerCase()}|${normalizeUnit(unit)}`;
 }
 
 /** Count how many times each recipe appears in a single week (plan occurrences) */
@@ -108,7 +111,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
         merged.set(key, {
           name: ing.name,
           quantity: scaledQty,
-          unit: ing.unit,
+          unit: normalizeUnit(ing.unit),
           category: ing.category,
           isLinked: !!linkedLib,
           linkedLibraryItem: linkedLib,
@@ -135,7 +138,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
       merged.set(key, {
         name: lib.name,
         quantity: null,
-        unit: lib.servingUnit ?? "",
+        unit: normalizeUnit(lib.servingUnit ?? ""),
         category: "other",
         isLinked: true,
         linkedLibraryItem: lib,

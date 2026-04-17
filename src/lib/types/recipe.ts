@@ -18,6 +18,11 @@ export type Difficulty = "easy" | "medium" | "hard";
 export interface Ingredient {
   id: string;
   quantity: number | null;
+  /**
+   * Canonical unit from src/lib/unit-standards.ts (shared with the food
+   * tracking app). Legacy recipes may contain non-canonical free-text;
+   * it's normalized on next save via the recipe form.
+   */
   unit: string;
   name: string;
   category: IngredientCategory;

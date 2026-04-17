@@ -25,3 +25,11 @@ env:
   - variable: NEXT_PUBLIC_APP_ENV
     value: "production"
     availability: [BUILD, RUNTIME]
+  # Gemini API key — server-side only (used by /api/generate-recipe-image).
+  # Restricted in Google Cloud Console to the Gemini API.
+  # Pulled from Secret Manager — the same `GEMINI_API_KEY` secret the workout
+  # app already uses in this project (workout-app-7da24), so all apps share
+  # one source of truth for this value.
+  - variable: GEMINI_API_KEY
+    secret: GEMINI_API_KEY
+    availability: [BUILD, RUNTIME]
