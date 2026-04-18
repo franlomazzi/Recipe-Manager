@@ -71,6 +71,7 @@ export function firestoreDocToRecipe(
     cookCount: (data.cookCount as number) ?? 0,
     householdShared: (data.householdShared as boolean) ?? false,
     ingredientExtensions: extensions,
+    sourceUrl: (data.sourceUrl as string) ?? null,
     createdAt: data.createdAt as Recipe["createdAt"],
     updatedAt: data.updatedAt as Recipe["updatedAt"],
   };
@@ -141,5 +142,7 @@ export function recipeToFirestoreDoc(
     rating: recipe.rating ?? null,
     cookCount: recipe.cookCount ?? 0,
     ingredientExtensions,
+    // Only include sourceUrl when present — Firestore rejects undefined.
+    ...(recipe.sourceUrl ? { sourceUrl: recipe.sourceUrl } : {}),
   };
 }

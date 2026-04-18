@@ -49,11 +49,30 @@ import { RECIPE_CATEGORIES, CUISINE_TAGS, DIET_TAGS } from "@/lib/types/recipe";
 import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
 import { saveIngredientToLibrary } from "@/lib/firebase/ingredient-library";
 import { IngredientCombobox } from "@/components/recipe/ingredient-combobox";
+import { findLibraryMatches } from "@/lib/utils/ingredient-match";
+import { CheckCircle2, Package } from "lucide-react";
 
 interface RecipeFormProps {
   recipe?: Recipe;
   improvements?: CookLog[];
+  /**
+   * When true, every ingredient carried in from `recipe` is treated as
+   * needing explicit library-mapping review before save. Used by the import
+   * flow (AI-produced drafts) to stop duplicate library entries from being
+   * silently created. Manually-added rows after the fact don't need review.
+   */
+  needsIngredientReview?: boolean;
 }
+
+// Review state per ingredient. Only populated for imported drafts when
+// needsIngredientReview=true — absence means "no review needed".
+// - pending: user hasn't decided yet; save is gated on this
+// - matched: user picked a library ingredient (the row's id is now the lib id)
+// - new: user confirmed this is a new library entry
+type IngredientReview =
+  | { type: "pending" }
+  | { type: "matched"; libraryId: string }
+  | { type: "new" };
 
 function createEmptyIngredient(): Ingredient {
   return {
@@ -77,10 +96,17 @@ function createEmptyStep(order: number): Step {
   };
 }
 
-export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
+export function RecipeForm({
+  recipe,
+  improvements,
+  needsIngredientReview = false,
+}: RecipeFormProps) {
   const { user } = useAuth();
   const router = useRouter();
-  const isEditing = !!recipe;
+  // An imported draft is passed in via the `recipe` prop with no id so we can
+  // reuse all the pre-fill logic below — but it must still save as a new
+  // recipe. Key off the id, not presence of the object.
+  const isEditing = !!recipe?.id;
   const { items: libraryItems } = useIngredientLibrary();
 
   const [title, setTitle] = useState(recipe?.title || "");
@@ -105,6 +131,37 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
   const [steps, setSteps] = useState<Step[]>(
     recipe?.steps?.length ? recipe.steps : [createEmptyStep(1)]
   );
+  // Review status keyed by ingredient.id. Only populated when the caller asked
+  // for review (import flow). New ingredients added during this session are
+  // never added here — they're assumed intentional.
+  const [reviewStatus, setReviewStatus] = useState<Record<string, IngredientReview>>(
+    () => {
+      if (!needsIngredientReview || !recipe?.ingredients?.length) return {};
+      const out: Record<string, IngredientReview> = {};
+      for (const ing of recipe.ingredients) {
+        out[ing.id] = { type: "pending" };
+      }
+      return out;
+    }
+  );
+  // Snapshot of what the AI produced, keyed by the current ingredient id.
+  // Shown as a muted reference in the review row so the user never loses
+  // sight of the source recipe's intent while they remap/edit. Keys migrate
+  // alongside reviewStatus when a row adopts a library ingredient's id.
+  const [originalImports, setOriginalImports] = useState<
+    Record<string, { quantity: number | null; unit: string; name: string }>
+  >(() => {
+    if (!needsIngredientReview || !recipe?.ingredients?.length) return {};
+    const out: Record<string, { quantity: number | null; unit: string; name: string }> = {};
+    for (const ing of recipe.ingredients) {
+      out[ing.id] = { quantity: ing.quantity, unit: ing.unit, name: ing.name };
+    }
+    return out;
+  });
+  const pendingReviewCount = Object.values(reviewStatus).filter(
+    (s) => s.type === "pending"
+  ).length;
+
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(recipe?.photoURL || null);
   const [saving, setSaving] = useState(false);
@@ -169,13 +226,20 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
   }
 
   function selectLibraryIngredient(index: number, item: LibraryIngredient) {
+    const oldId = ingredients[index]?.id;
     setIngredients((prev) => {
       const updated = [...prev];
+      // Preserve the row's existing unit and quantity when mapping. When a
+      // recipe is imported, the quantity and unit reflect the recipe's intent
+      // ("1 tsp salt") and must survive the mapping — silently adopting the
+      // library's default unit ("tbsp") would misrepresent the recipe. Only
+      // fall back to the library's servingUnit when the row has no unit yet
+      // (manual-entry path where the user is picking from scratch).
       updated[index] = {
         ...updated[index],
         id: item.id,
         name: item.name,
-        unit: item.servingUnit || updated[index].unit,
+        unit: updated[index].unit || item.servingUnit || "",
         calories: item.calories,
         protein: item.protein,
         carbs: item.carbs,
@@ -186,6 +250,54 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
       };
       return updated;
     });
+    // If this row was flagged for review, record the mapping and migrate the
+    // review entry to the new (library) id so the pending count updates and
+    // the lookup still finds this row on re-render.
+    if (oldId && reviewStatus[oldId]) {
+      setReviewStatus((prev) => {
+        const next = { ...prev };
+        delete next[oldId];
+        next[item.id] = { type: "matched", libraryId: item.id };
+        return next;
+      });
+      // Migrate the "original import" snapshot too so we can keep showing
+      // the recipe's stated qty/unit/name on the now-matched row.
+      setOriginalImports((prev) => {
+        if (!prev[oldId]) return prev;
+        const next = { ...prev };
+        const snapshot = next[oldId];
+        delete next[oldId];
+        next[item.id] = snapshot;
+        return next;
+      });
+    }
+    // Re-parent any step linkages that referenced the old id.
+    if (oldId && oldId !== item.id) {
+      setSteps((prev) =>
+        prev.map((s) => ({
+          ...s,
+          ingredients: s.ingredients.map((si) =>
+            si.ingredientId === oldId
+              ? { ...si, ingredientId: item.id }
+              : si
+          ),
+        }))
+      );
+    }
+  }
+
+  function confirmKeepAsNew(ingredientId: string) {
+    setReviewStatus((prev) => ({
+      ...prev,
+      [ingredientId]: { type: "new" },
+    }));
+  }
+
+  function reopenReview(ingredientId: string) {
+    setReviewStatus((prev) => ({
+      ...prev,
+      [ingredientId]: { type: "pending" },
+    }));
   }
 
   function addIngredient() {
@@ -247,6 +359,20 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
         ingredients: s.ingredients.filter((si) => si.ingredientId !== removedId),
       }))
     );
+    if (reviewStatus[removedId]) {
+      setReviewStatus((prev) => {
+        const next = { ...prev };
+        delete next[removedId];
+        return next;
+      });
+    }
+    if (originalImports[removedId]) {
+      setOriginalImports((prev) => {
+        const next = { ...prev };
+        delete next[removedId];
+        return next;
+      });
+    }
   }
 
   // Compute how much of each ingredient is already allocated across all steps
@@ -318,6 +444,13 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
 
     if (validSteps.length === 0) {
       toast.error("Please add at least one step");
+      return;
+    }
+
+    if (pendingReviewCount > 0) {
+      toast.error(
+        `Review ${pendingReviewCount} imported ingredient${pendingReviewCount === 1 ? "" : "s"} before saving.`
+      );
       return;
     }
 
@@ -641,58 +774,142 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
       <Card>
         <CardHeader>
           <CardTitle>Ingredients</CardTitle>
+          {needsIngredientReview && (
+            <p className="text-xs text-muted-foreground">
+              {pendingReviewCount > 0
+                ? `Review each imported ingredient below — map it to something you already have, or confirm it's new. ${pendingReviewCount} left.`
+                : "All imported ingredients reviewed. You can save."}
+            </p>
+          )}
         </CardHeader>
         <CardContent className="space-y-3">
-          {ingredients.map((ing, index) => (
-            <div key={ing.id} className="flex items-start gap-2">
-              <GripVertical className="mt-2.5 h-4 w-4 shrink-0 text-muted-foreground/50 hidden sm:block" />
-              <div className="grid flex-1 grid-cols-6 sm:grid-cols-12 gap-2">
-                <Input
-                  className="col-span-2"
-                  placeholder="Qty"
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={ing.quantity ?? ""}
-                  onChange={(e) =>
-                    updateIngredient(
-                      index,
-                      "quantity",
-                      e.target.value ? parseFloat(e.target.value) : null
-                    )
-                  }
-                />
-                <UnitCombobox
-                  className="col-span-2"
-                  value={ing.unit}
-                  onValueChange={(v) => updateIngredient(index, "unit", v)}
-                />
-                <IngredientCombobox
-                  className="col-span-2 sm:col-span-5"
-                  value={ing.name}
-                  libraryItems={libraryItems}
-                  onSelectLibraryItem={(item) => selectLibraryIngredient(index, item)}
-                  onNameChange={(name) => updateIngredient(index, "name", name)}
-                />
-                <Input
-                  className="col-span-5 sm:col-span-3"
-                  placeholder="Note (optional)"
-                  value={ing.note}
-                  onChange={(e) => updateIngredient(index, "note", e.target.value)}
-                />
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="mt-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                onClick={() => removeIngredientAndCleanSteps(index)}
-                disabled={ingredients.length === 1}
+          {ingredients.map((ing, index) => {
+            const review = reviewStatus[ing.id];
+            const isPending = review?.type === "pending";
+            const isMatched = review?.type === "matched";
+            const isNew = review?.type === "new";
+            const original = originalImports[ing.id];
+            // Only render the reference line when the current row has drifted
+            // from what the AI produced — otherwise it's visual noise.
+            const hasDrifted =
+              !!original &&
+              (original.quantity !== ing.quantity ||
+                original.unit !== ing.unit ||
+                original.name !== ing.name);
+            return (
+              <div
+                key={ing.id}
+                className={
+                  isPending
+                    ? "rounded-md border-l-4 border-amber-500 bg-amber-500/5 p-2"
+                    : isMatched || isNew
+                      ? "rounded-md border-l-4 border-emerald-500/60 bg-emerald-500/5 p-2"
+                      : ""
+                }
               >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
+                <div className="flex items-start gap-2">
+                  <GripVertical className="mt-2.5 h-4 w-4 shrink-0 text-muted-foreground/50 hidden sm:block" />
+                  <div className="grid flex-1 grid-cols-6 sm:grid-cols-12 gap-2">
+                    <Input
+                      className="col-span-2"
+                      placeholder="Qty"
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={ing.quantity ?? ""}
+                      onChange={(e) =>
+                        updateIngredient(
+                          index,
+                          "quantity",
+                          e.target.value ? parseFloat(e.target.value) : null
+                        )
+                      }
+                    />
+                    <UnitCombobox
+                      className="col-span-2"
+                      value={ing.unit}
+                      onValueChange={(v) => updateIngredient(index, "unit", v)}
+                    />
+                    <IngredientCombobox
+                      className="col-span-2 sm:col-span-5"
+                      value={ing.name}
+                      libraryItems={libraryItems}
+                      onSelectLibraryItem={(item) => selectLibraryIngredient(index, item)}
+                      onNameChange={(name) => updateIngredient(index, "name", name)}
+                    />
+                    <Input
+                      className="col-span-5 sm:col-span-3"
+                      placeholder="Note (optional)"
+                      value={ing.note}
+                      onChange={(e) => updateIngredient(index, "note", e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="mt-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => removeIngredientAndCleanSteps(index)}
+                    disabled={ingredients.length === 1}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {original && (isPending || isMatched) && hasDrifted && (
+                  <ImportReference
+                    original={original}
+                    current={{ quantity: ing.quantity, unit: ing.unit, name: ing.name }}
+                    onRestore={() => {
+                      updateIngredient(index, "quantity", original.quantity);
+                      updateIngredient(index, "unit", original.unit);
+                    }}
+                  />
+                )}
+
+                {isPending && (
+                  <ReviewPanel
+                    name={ing.name}
+                    library={libraryItems}
+                    onPickMatch={(item) => selectLibraryIngredient(index, item)}
+                    onKeepAsNew={() => confirmKeepAsNew(ing.id)}
+                  />
+                )}
+
+                {(isMatched || isNew) && (
+                  <div className="mt-2 ml-6 flex items-center gap-2 text-xs">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    <span className="text-muted-foreground">
+                      {isMatched ? (
+                        <>
+                          Mapped to library ingredient{" "}
+                          <span className="font-medium text-foreground">
+                            {ing.name}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          Will be saved as a{" "}
+                          <span className="font-medium text-foreground">
+                            new library ingredient
+                          </span>
+                        </>
+                      )}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => reopenReview(ing.id)}
+                    >
+                      Change
+                    </Button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <Button type="button" variant="outline" size="sm" onClick={addIngredient}>
             <Plus className="mr-2 h-4 w-4" />
             Add Ingredient
@@ -929,14 +1146,122 @@ export function RecipeForm({ recipe, improvements }: RecipeFormProps) {
 
       {/* Submit */}
       <div className="flex gap-3">
-        <Button type="submit" disabled={saving}>
+        <Button type="submit" disabled={saving || pendingReviewCount > 0}>
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {isEditing ? "Update Recipe" : "Save Recipe"}
+          {pendingReviewCount > 0
+            ? `Review ${pendingReviewCount} ingredient${pendingReviewCount === 1 ? "" : "s"}`
+            : isEditing
+              ? "Update Recipe"
+              : "Save Recipe"}
         </Button>
         <Button type="button" variant="outline" onClick={() => router.back()}>
           Cancel
         </Button>
       </div>
     </form>
+  );
+}
+
+// Muted one-liner reminder of what the AI produced. Rendered whenever the
+// current row has drifted from the import (usually because the user picked a
+// library ingredient whose default unit differs). Includes a one-click
+// "restore" that pulls quantity + unit back to what the recipe said — the
+// name is left alone because that's the mapping the user just chose.
+function ImportReference({
+  original,
+  current,
+  onRestore,
+}: {
+  original: { quantity: number | null; unit: string; name: string };
+  current: { quantity: number | null; unit: string; name: string };
+  onRestore: () => void;
+}) {
+  const qtyChanged = original.quantity !== current.quantity;
+  const unitChanged = original.unit !== current.unit;
+  const qtyUnitDrifted = qtyChanged || unitChanged;
+  const formatQty = (q: number | null) => (q == null ? "" : String(q));
+  return (
+    <div className="mt-1 ml-6 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span>
+        From import:{" "}
+        <span className="font-medium text-foreground/80">
+          {formatQty(original.quantity)} {original.unit} {original.name}
+        </span>
+      </span>
+      {qtyUnitDrifted && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={onRestore}
+          title="Restore the recipe's original quantity and unit"
+        >
+          Restore qty/unit
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// Inline review panel for imported ingredients. Surfaces top library matches
+// so the user can pick one, or confirm a create-new. Kept as a subcomponent
+// so the match recompute on each render is cheap (small library, small list).
+function ReviewPanel({
+  name,
+  library,
+  onPickMatch,
+  onKeepAsNew,
+}: {
+  name: string;
+  library: LibraryIngredient[];
+  onPickMatch: (item: LibraryIngredient) => void;
+  onKeepAsNew: () => void;
+}) {
+  const matches = findLibraryMatches(name, library, 5);
+  return (
+    <div className="mt-2 ml-6 space-y-2 rounded-md bg-background/60 p-2 text-sm">
+      {matches.length > 0 ? (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Looks similar to these existing ingredients — pick one to avoid duplicates:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {matches.map((m) => (
+              <Button
+                key={m.item.id}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                onClick={() => onPickMatch(m.item)}
+                title={`Use ${m.item.name} from your library`}
+              >
+                <Package className="h-3 w-3 text-muted-foreground" />
+                {m.item.name}
+              </Button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          No similar ingredients in your library.
+        </p>
+      )}
+      <div className="flex items-center gap-2 pt-1">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={onKeepAsNew}
+        >
+          Keep as new
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          — or edit the name above to refine the search.
+        </span>
+      </div>
+    </div>
   );
 }

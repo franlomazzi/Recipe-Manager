@@ -672,6 +672,8 @@ export default function RecipeDetailPage() {
         </Card>
       )}
 
+      <RecipeSourceLine url={recipe.sourceUrl ?? null} />
+
       {/* Cook Logs & Version History */}
       {(cookLogs.length > 0 || versions.length > 0) && (
         <Tabs defaultValue="logs">
@@ -867,5 +869,32 @@ export default function RecipeDetailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Discreet source attribution for imported recipes. Renders nothing when
+// there's no sourceUrl (hand-authored recipes stay clean). Shows the
+// hostname so the footer stays readable even for ugly tracking-laden URLs,
+// but links the full canonical URL.
+function RecipeSourceLine({ url }: { url: string | null }) {
+  if (!url) return null;
+  let hostname = url;
+  try {
+    hostname = new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    // Malformed URL — fall through and show the raw string.
+  }
+  return (
+    <p className="pt-2 text-center text-xs text-muted-foreground">
+      Imported from{" "}
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-dotted hover:text-foreground"
+      >
+        {hostname}
+      </a>
+    </p>
   );
 }

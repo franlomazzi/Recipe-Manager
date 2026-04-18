@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Search, Clock, ChefHat, Heart, Star } from "lucide-react";
 import Link from "next/link";
+import { ImportRecipeModal } from "@/components/recipe/import-recipe-modal";
 
 export default function RecipesPage() {
   const { recipes } = useRecipes();
@@ -23,10 +24,13 @@ export default function RecipesPage() {
     <div className="p-4 md:p-6 lg:p-8 space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Recipes</h1>
-        <Button className="rounded-xl" render={<Link href="/recipes/new" />}>
-          <Plus className="mr-2 h-4 w-4" />
-          New Recipe
-        </Button>
+        <div className="flex items-center gap-2">
+          <ImportRecipeModal />
+          <Button className="rounded-xl" render={<Link href="/recipes/new" />}>
+            <Plus className="mr-2 h-4 w-4" />
+            New Recipe
+          </Button>
+        </div>
       </div>
 
       <div className="relative">

@@ -103,6 +103,9 @@ export interface Recipe {
   householdShared?: boolean;
   // Ingredient extensions (category/note) keyed by ingredient id/foodId
   ingredientExtensions: Record<string, IngredientExtension>;
+  // Origin URL when this recipe was imported from a website, video, etc.
+  // Absent on hand-authored recipes.
+  sourceUrl?: string | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
