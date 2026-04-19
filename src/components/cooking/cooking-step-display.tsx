@@ -17,6 +17,7 @@ import {
   Play,
   Pause,
   RotateCcw,
+  StickyNote,
 } from "lucide-react";
 import { useCookingSession } from "@/lib/contexts/cooking-session-context";
 import type { CookingSession } from "@/lib/types/cooking-session";
@@ -178,9 +179,10 @@ interface CookingStepDisplayProps {
 
 export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
   const router = useRouter();
-  const { updateSession, removeSession } = useCookingSession();
+  const { updateSession, removeSession, setStepNote } = useCookingSession();
   const [showResults, setShowResults] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeNoteStep, setActiveNoteStep] = useState<number | null>(null);
   // Ingredient check state for the ingredients step (local, not persisted)
   const [checkedIngredients, setCheckedIngredients] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -203,7 +205,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
     }
   }, [viewMode]);
 
-  const { recipe, cookLogs, currentStep, servingMultiplier, suggestionsDismissed } = session;
+  const { recipe, cookLogs, currentStep, servingMultiplier, suggestionsDismissed, stepNotes } = session;
 
   const unappliedImprovements = cookLogs.filter(
     (log) => log.improvements?.trim() && log.appliedToVersion === null
@@ -318,6 +320,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
       <CookingResults
         recipe={recipe}
         servingsCooked={adjustedServings}
+        stepNotes={stepNotes}
         onClose={() => {
           removeSession(recipe.id);
           router.push("/recipes");
@@ -486,6 +489,41 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                 ))}
               </div>
             )}
+
+            {/* Step note — focus mode */}
+            <div className="mt-8 w-full max-w-lg">
+              {activeNoteStep === currentStep ? (
+                <textarea
+                  autoFocus
+                  placeholder="Add a note for this step..."
+                  value={stepNotes[currentStep] || ""}
+                  onChange={(e) => setStepNote(recipe.id, currentStep, e.target.value)}
+                  onBlur={() => {
+                    if (!stepNotes[currentStep]?.trim()) setActiveNoteStep(null);
+                  }}
+                  rows={2}
+                  className="w-full resize-none rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+                />
+              ) : stepNotes[currentStep]?.trim() ? (
+                <button
+                  onClick={() => setActiveNoteStep(currentStep)}
+                  className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-3"
+                >
+                  <div className="flex items-start gap-2">
+                    <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                    <span className="text-sm">{stepNotes[currentStep]}</span>
+                  </div>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setActiveNoteStep(currentStep)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <StickyNote className="h-3.5 w-3.5" />
+                  Add note for this step
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           /* ── Multi-step views (split / grid / list) ── */
@@ -603,6 +641,49 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                               </div>
                             );
                           })()}
+
+                          {/* Step note — multi-step card */}
+                          <div className="mt-2">
+                            {activeNoteStep === virtualIndex ? (
+                              <textarea
+                                autoFocus
+                                placeholder="Add a note..."
+                                value={stepNotes[virtualIndex] || ""}
+                                onChange={(e) =>
+                                  setStepNote(recipe.id, virtualIndex, e.target.value)
+                                }
+                                onBlur={() => {
+                                  if (!stepNotes[virtualIndex]?.trim())
+                                    setActiveNoteStep(null);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                rows={2}
+                                className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-primary/40"
+                              />
+                            ) : stepNotes[virtualIndex]?.trim() ? (
+                              <div
+                                className="flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveNoteStep(virtualIndex);
+                                }}
+                              >
+                                <StickyNote className="h-3 w-3 shrink-0 mt-0.5 text-amber-600" />
+                                <span className="text-[11px]">{stepNotes[virtualIndex]}</span>
+                              </div>
+                            ) : isCurrent ? (
+                              <button
+                                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveNoteStep(virtualIndex);
+                                }}
+                              >
+                                <StickyNote className="h-3 w-3" />
+                                Add note
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     </div>

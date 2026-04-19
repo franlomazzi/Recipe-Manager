@@ -21,6 +21,7 @@ export interface CookingSession {
   servingsLocked: boolean;
   suggestionsDismissed: boolean;
   startedAt: number;
+  stepNotes: Record<number, string>;
 }
 
 export interface CookingSessionContextValue {
@@ -37,6 +38,7 @@ export interface CookingSessionContextValue {
   resetTimer: (timerId: string) => void;
   adjustTimer: (timerId: string, deltaSeconds: number) => void;
   removeTimer: (timerId: string) => void;
+  setStepNote: (recipeId: string, stepIndex: number, note: string) => void;
   isAnyCooking: boolean;
   persistentAlarm: boolean;
   setPersistentAlarm: (value: boolean) => void;
