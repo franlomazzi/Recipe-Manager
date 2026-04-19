@@ -269,7 +269,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
           ) : stepNotes[currentStep]?.trim() ? (
             <button
               onClick={() => setActiveNoteStep(currentStep)}
-              className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-3"
+              className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3"
             >
               <div className="flex items-start gap-2">
                 <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
@@ -279,10 +279,10 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
           ) : (
             <button
               onClick={() => setActiveNoteStep(currentStep)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
             >
-              <StickyNote className="h-3.5 w-3.5" />
-              Add note for this step
+              <StickyNote className="h-4 w-4" />
+              Add a note for this step
             </button>
           )}
         </div>

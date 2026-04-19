@@ -507,7 +507,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
               ) : stepNotes[currentStep]?.trim() ? (
                 <button
                   onClick={() => setActiveNoteStep(currentStep)}
-                  className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-3"
+                  className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3"
                 >
                   <div className="flex items-start gap-2">
                     <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
@@ -517,10 +517,10 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
               ) : (
                 <button
                   onClick={() => setActiveNoteStep(currentStep)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
                 >
-                  <StickyNote className="h-3.5 w-3.5" />
-                  Add note for this step
+                  <StickyNote className="h-4 w-4" />
+                  Add a note for this step
                 </button>
               )}
             </div>
@@ -591,6 +591,22 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                           {virtualIndex}
                         </div>
                         <div className="flex-1 min-w-0">
+                          {/* Note icon button — always visible in card header */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveNoteStep(activeNoteStep === virtualIndex ? null : virtualIndex);
+                            }}
+                            className={cn(
+                              "float-right ml-2 flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
+                              stepNotes[virtualIndex]?.trim()
+                                ? "bg-amber-500/15 text-amber-600"
+                                : "text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+                            )}
+                            title="Add step note"
+                          >
+                            <StickyNote className="h-3.5 w-3.5" />
+                          </button>
                           <p
                             className={cn(
                               "font-medium leading-relaxed",
@@ -642,12 +658,12 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                             );
                           })()}
 
-                          {/* Step note — multi-step card */}
-                          <div className="mt-2">
-                            {activeNoteStep === virtualIndex ? (
+                          {/* Step note — inline editor */}
+                          {activeNoteStep === virtualIndex && (
+                            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                               <textarea
                                 autoFocus
-                                placeholder="Add a note..."
+                                placeholder="Add a note for this step..."
                                 value={stepNotes[virtualIndex] || ""}
                                 onChange={(e) =>
                                   setStepNote(recipe.id, virtualIndex, e.target.value)
@@ -656,34 +672,23 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                                   if (!stepNotes[virtualIndex]?.trim())
                                     setActiveNoteStep(null);
                                 }}
-                                onClick={(e) => e.stopPropagation()}
                                 rows={2}
                                 className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-primary/40"
                               />
-                            ) : stepNotes[virtualIndex]?.trim() ? (
-                              <div
-                                className="flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 cursor-pointer"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveNoteStep(virtualIndex);
-                                }}
-                              >
-                                <StickyNote className="h-3 w-3 shrink-0 mt-0.5 text-amber-600" />
-                                <span className="text-[11px]">{stepNotes[virtualIndex]}</span>
-                              </div>
-                            ) : isCurrent ? (
-                              <button
-                                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveNoteStep(virtualIndex);
-                                }}
-                              >
-                                <StickyNote className="h-3 w-3" />
-                                Add note
-                              </button>
-                            ) : null}
-                          </div>
+                            </div>
+                          )}
+                          {activeNoteStep !== virtualIndex && stepNotes[virtualIndex]?.trim() && (
+                            <div
+                              className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveNoteStep(virtualIndex);
+                              }}
+                            >
+                              <StickyNote className="h-3 w-3 shrink-0 mt-0.5 text-amber-600" />
+                              <span className="text-[11px]">{stepNotes[virtualIndex]}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
