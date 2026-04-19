@@ -21,6 +21,7 @@ type Action =
   | { type: "REMOVE_SESSION"; recipeId: string }
   | { type: "SET_ACTIVE"; recipeId: string }
   | { type: "UPDATE_SESSION"; recipeId: string; updates: Partial<CookingSession> }
+  | { type: "SET_STEP_NOTE"; recipeId: string; stepIndex: number; note: string }
   | { type: "START_TIMER"; timer: ActiveTimer }
   | { type: "PAUSE_TIMER"; timerId: string }
   | { type: "RESUME_TIMER"; timerId: string }
@@ -57,6 +58,7 @@ function reducer(state: State, action: Action): State {
             servingsLocked: true,
             suggestionsDismissed: false,
             startedAt: Date.now(),
+            stepNotes: {},
           },
         ],
         activeSessionId: action.recipe.id,
@@ -92,6 +94,15 @@ function reducer(state: State, action: Action): State {
         ...state,
         sessions: state.sessions.map((s) =>
           s.recipeId === action.recipeId ? { ...s, ...action.updates } : s
+        ),
+      };
+    case "SET_STEP_NOTE":
+      return {
+        ...state,
+        sessions: state.sessions.map((s) =>
+          s.recipeId === action.recipeId
+            ? { ...s, stepNotes: { ...s.stepNotes, [action.stepIndex]: action.note } }
+            : s
         ),
       };
     case "START_TIMER":
@@ -404,6 +415,10 @@ export function CookingSessionProvider({
     dispatch({ type: "ACKNOWLEDGE_ALL_ALARMS" });
   }, []);
 
+  const setStepNote = useCallback((recipeId: string, stepIndex: number, note: string) => {
+    dispatch({ type: "SET_STEP_NOTE", recipeId, stepIndex, note });
+  }, []);
+
   return (
     <CookingSessionContext.Provider
       value={{
@@ -414,6 +429,7 @@ export function CookingSessionProvider({
         removeSession,
         setActiveSession,
         updateSession,
+        setStepNote,
         startTimer,
         pauseTimer,
         resumeTimer,

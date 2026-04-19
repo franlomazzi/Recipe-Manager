@@ -18,6 +18,7 @@ import {
   Minus,
   Plus,
   Lightbulb,
+  StickyNote,
 } from "lucide-react";
 import { ImprovementSuggestions } from "@/components/recipe/improvement-suggestions";
 import type { Recipe, CookLog } from "@/lib/types/recipe";
@@ -37,6 +38,8 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [servingsLocked, setServingsLocked] = useState(false);
+  const [stepNotes, setStepNotes] = useState<Record<number, string>>({});
+  const [activeNoteStep, setActiveNoteStep] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
 
@@ -80,9 +83,14 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
     if (!isFirst) setCurrentStep((s) => s - 1);
   }, [isFirst]);
 
+  function setStepNote(stepIndex: number, note: string) {
+    setStepNotes((prev) => ({ ...prev, [stepIndex]: note }));
+  }
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (showResults) return;
+      if (e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
         goNext();
@@ -129,6 +137,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
       <CookingResults
         recipe={recipe}
         servingsCooked={adjustedServings}
+        stepNotes={stepNotes}
         onClose={() => router.back()}
       />
     );
@@ -242,6 +251,41 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
             ))}
           </div>
         )}
+
+        {/* Step note */}
+        <div className="mt-8 w-full max-w-lg">
+          {activeNoteStep === currentStep ? (
+            <textarea
+              autoFocus
+              placeholder="Add a note for this step..."
+              value={stepNotes[currentStep] || ""}
+              onChange={(e) => setStepNote(currentStep, e.target.value)}
+              onBlur={() => {
+                if (!stepNotes[currentStep]?.trim()) setActiveNoteStep(null);
+              }}
+              rows={2}
+              className="w-full resize-none rounded-xl border-2 border-primary/40 bg-card px-4 py-3 text-sm outline-none focus:border-primary"
+            />
+          ) : stepNotes[currentStep]?.trim() ? (
+            <button
+              onClick={() => setActiveNoteStep(currentStep)}
+              className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3"
+            >
+              <div className="flex items-start gap-2">
+                <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                <span className="text-sm">{stepNotes[currentStep]}</span>
+              </div>
+            </button>
+          ) : (
+            <button
+              onClick={() => setActiveNoteStep(currentStep)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-muted px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
+            >
+              <StickyNote className="h-4 w-4" />
+              Add a note for this step
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Navigation */}

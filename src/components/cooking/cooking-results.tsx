@@ -15,6 +15,7 @@ import {
   Lightbulb,
   ArrowUpCircle,
   PartyPopper,
+  StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Recipe } from "@/lib/types/recipe";
@@ -22,18 +23,30 @@ import type { Recipe } from "@/lib/types/recipe";
 interface CookingResultsProps {
   recipe: Recipe;
   servingsCooked: number;
+  stepNotes?: Record<number, string>;
   onClose: () => void;
+}
+
+function formatStepNotes(stepNotes: Record<number, string>): string {
+  return Object.entries(stepNotes)
+    .filter(([, note]) => note.trim())
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([idx, note]) => `Step ${idx}: ${note}`)
+    .join("\n");
 }
 
 export function CookingResults({
   recipe,
   servingsCooked,
+  stepNotes,
   onClose,
 }: CookingResultsProps) {
   const { user } = useAuth();
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(() =>
+    stepNotes ? formatStepNotes(stepNotes) : ""
+  );
   const [improvements, setImprovements] = useState("");
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -151,6 +164,31 @@ export function CookingResults({
               </CardContent>
             </Card>
 
+            {/* Step notes summary (read-only context) */}
+            {stepNotes && Object.values(stepNotes).some((n) => n.trim()) && (
+              <Card className="border-amber-500/30 bg-amber-500/5">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <StickyNote className="h-4 w-4 text-amber-600" />
+                    Step Notes from This Session
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-1.5">
+                  {Object.entries(stepNotes)
+                    .filter(([, note]) => note.trim())
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([idx, note]) => (
+                      <div key={idx} className="flex gap-2 text-sm">
+                        <span className="shrink-0 font-medium text-muted-foreground">
+                          Step {idx}:
+                        </span>
+                        <span>{note}</span>
+                      </div>
+                    ))}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Notes */}
             <Card>
               <CardHeader className="pb-3">
@@ -163,6 +201,11 @@ export function CookingResults({
                   onChange={(e) => setNotes(e.target.value)}
                   rows={3}
                 />
+                {stepNotes && Object.values(stepNotes).some((n) => n.trim()) && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Pre-filled from your step notes — edit as needed.
+                  </p>
+                )}
               </CardContent>
             </Card>
 
