@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -24,9 +24,11 @@ import {
   Settings,
   LogOut,
   LayoutDashboard,
-  PanelLeftClose,
-  PanelLeftOpen,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+
+const AUTO_COLLAPSE_MS = 5000;
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -41,16 +43,60 @@ export function AppSidebar() {
   const { user } = useAuth();
   const { sessions } = useCookingSession();
   const [collapsed, setCollapsed] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const autoCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("sidebar-collapsed");
     if (saved === "true") setCollapsed(true);
+    setIsTouchDevice(window.matchMedia("(pointer: coarse)").matches);
   }, []);
+
+  const scheduleAutoCollapse = useCallback(() => {
+    if (autoCollapseTimer.current) clearTimeout(autoCollapseTimer.current);
+    autoCollapseTimer.current = setTimeout(() => {
+      setCollapsed(true);
+    }, AUTO_COLLAPSE_MS);
+  }, []);
+
+  const cancelAutoCollapse = useCallback(() => {
+    if (autoCollapseTimer.current) {
+      clearTimeout(autoCollapseTimer.current);
+      autoCollapseTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (autoCollapseTimer.current) clearTimeout(autoCollapseTimer.current);
+    };
+  }, []);
+
+  // Touch devices: start the auto-collapse timer whenever the sidebar is open,
+  // and collapse immediately if the user taps outside.
+  useEffect(() => {
+    if (!isTouchDevice || collapsed) return;
+    scheduleAutoCollapse();
+    function handleOutsideTap(e: MouseEvent | TouchEvent) {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setCollapsed(true);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideTap);
+    document.addEventListener("touchstart", handleOutsideTap);
+    return () => {
+      cancelAutoCollapse();
+      document.removeEventListener("mousedown", handleOutsideTap);
+      document.removeEventListener("touchstart", handleOutsideTap);
+    };
+  }, [isTouchDevice, collapsed, scheduleAutoCollapse, cancelAutoCollapse]);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
-      localStorage.setItem("sidebar-collapsed", String(!prev));
-      return !prev;
+      const next = !prev;
+      localStorage.setItem("sidebar-collapsed", String(next));
+      return next;
     });
   }
 
@@ -64,11 +110,28 @@ export function AppSidebar() {
 
   return (
     <aside
+      ref={sidebarRef}
       className={cn(
-        "hidden lg:flex lg:flex-col lg:border-r lg:border-sidebar-border lg:bg-sidebar transition-[width] duration-200",
+        "group hidden lg:flex lg:flex-col lg:border-r lg:border-sidebar-border lg:bg-sidebar transition-[width] duration-200 relative",
         collapsed ? "lg:w-16" : "lg:w-64"
       )}
+      onMouseEnter={isTouchDevice ? undefined : cancelAutoCollapse}
+      onMouseLeave={isTouchDevice ? undefined : scheduleAutoCollapse}
+      onTouchStart={isTouchDevice ? scheduleAutoCollapse : undefined}
     >
+      {/* Edge toggle — sits on the right border, visible on sidebar hover */}
+      <button
+        className="absolute right-0 top-20 z-10 flex h-5 w-5 translate-x-1/2 items-center justify-center rounded-full border border-sidebar-border/60 bg-sidebar text-muted-foreground/40 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:border-sidebar-border hover:text-muted-foreground"
+        onClick={toggleCollapsed}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {collapsed ? (
+          <ChevronRight className="h-3 w-3" />
+        ) : (
+          <ChevronLeft className="h-3 w-3" />
+        )}
+      </button>
+
       <div
         className={cn(
           "flex h-16 items-center border-b border-sidebar-border",
@@ -132,23 +195,6 @@ export function AppSidebar() {
           );
         })}
       </nav>
-
-      {/* Collapse toggle */}
-      <div className="px-2 py-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("h-8 w-8 text-muted-foreground", !collapsed && "ml-auto")}
-          onClick={toggleCollapsed}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? (
-            <PanelLeftOpen className="h-4 w-4" />
-          ) : (
-            <PanelLeftClose className="h-4 w-4" />
-          )}
-        </Button>
-      </div>
 
       <div className="border-t border-sidebar-border p-2">
         <DropdownMenu>

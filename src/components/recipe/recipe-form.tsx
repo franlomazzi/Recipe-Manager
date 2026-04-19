@@ -43,6 +43,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { generateRecipeImage } from "@/lib/services/gemini-service";
+import { mapStepIngredientsWithAI } from "@/lib/services/step-ingredient-mapper-service";
 import { toast } from "sonner";
 import type { Recipe, Ingredient, Step, StepIngredient, Difficulty, CookLog, LibraryIngredient } from "@/lib/types/recipe";
 import { RECIPE_CATEGORIES, CUISINE_TAGS, DIET_TAGS } from "@/lib/types/recipe";
@@ -161,6 +162,14 @@ export function RecipeForm({
   const pendingReviewCount = Object.values(reviewStatus).filter(
     (s) => s.type === "pending"
   ).length;
+  // When an import lands, we gate step-level editing (instruction text,
+  // AI mapping, timer auto-detect, add/remove step, per-step timer + ingredient
+  // widgets) until the user has resolved every imported ingredient. Reasoning:
+  // the AI step-ingredient mapper matches on ingredient names and ids; if the
+  // user is still mid-review, those ids are about to change as rows adopt
+  // library ingredients, and any mapping done now would be stale. Same logic
+  // for timers — cheap to postpone, avoids confusing half-reviewed state.
+  const stepsLocked = needsIngredientReview && pendingReviewCount > 0;
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(recipe?.photoURL || null);
@@ -168,6 +177,7 @@ export function RecipeForm({
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [generatingPhoto, setGeneratingPhoto] = useState(false);
+  const [mappingSteps, setMappingSteps] = useState(false);
 
   function toggleCategory(cat: string) {
     setCategories((prev) =>
@@ -423,6 +433,102 @@ export function RecipeForm({
     });
   }
 
+  async function handleMapStepIngredientsWithAI() {
+    const validIngredients = ingredients.filter((i) => i.name.trim());
+    const validSteps = steps.filter((s) => s.instruction.trim());
+
+    if (validIngredients.length === 0) {
+      toast.error("Add some ingredients first.");
+      return;
+    }
+    if (validSteps.length === 0) {
+      toast.error("Add some steps first.");
+      return;
+    }
+
+    // Warn before overwriting existing manual mappings.
+    const hasExisting = steps.some((s) => s.ingredients.length > 0);
+    if (hasExisting) {
+      const ok = window.confirm(
+        "This will replace any ingredients already mapped to steps. Continue?"
+      );
+      if (!ok) return;
+    }
+
+    setMappingSteps(true);
+    try {
+      const mappings = await mapStepIngredientsWithAI({
+        ingredients: validIngredients.map((i) => ({
+          id: i.id,
+          name: i.name,
+          quantity: i.quantity,
+          unit: i.unit,
+          note: i.note || undefined,
+        })),
+        steps: validSteps.map((s) => ({
+          id: s.id,
+          order: s.order,
+          instruction: s.instruction,
+        })),
+      });
+
+      const byStepId = new Map(mappings.map((m) => [m.stepId, m.ingredients]));
+      setSteps((prev) =>
+        prev.map((s) => {
+          const mapped = byStepId.get(s.id);
+          if (!mapped) return { ...s, ingredients: [] };
+          return { ...s, ingredients: mapped };
+        })
+      );
+      const mappedCount = mappings.reduce(
+        (sum, m) => sum + m.ingredients.length,
+        0
+      );
+      toast.success(
+        mappedCount > 0
+          ? `Mapped ${mappedCount} ingredient${mappedCount === 1 ? "" : "s"} across ${mappings.length} step${mappings.length === 1 ? "" : "s"}.`
+          : "AI couldn't confidently map any ingredients — review the steps and try again."
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "AI mapping failed."
+      );
+    } finally {
+      setMappingSteps(false);
+    }
+  }
+
+  // Run the regex timer detector across every step that currently has no
+  // timer set. Used by the "Auto-detect timers" button so saved recipes
+  // predating AI-defined timers (or steps the import path missed) can be
+  // bulk-enriched in one click. Won't overwrite manually-set timers — if the
+  // user deliberately removed one in the past, they're safe from re-adding.
+  function handleAutoDetectTimers() {
+    let filledCount = 0;
+    setSteps((prev) =>
+      prev.map((s) => {
+        if (s.timerMinutes !== null && s.timerMinutes !== undefined) return s;
+        const detected = detectTimer(s.instruction ?? "");
+        if (!detected) return s;
+        filledCount += 1;
+        return {
+          ...s,
+          timerMinutes: detected.minutes,
+          timerLabel: detected.label,
+        };
+      })
+    );
+    if (filledCount === 0) {
+      toast.info(
+        "No new timers detected. Steps either already have timers or don't mention an explicit duration."
+      );
+    } else {
+      toast.success(
+        `Added ${filledCount} timer${filledCount === 1 ? "" : "s"}. Review and adjust before saving.`
+      );
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
@@ -483,6 +589,9 @@ export function RecipeForm({
         photoURL: recipe?.photoURL || null,
         photoStoragePath: recipe?.photoStoragePath || null,
         ingredientExtensions: recipe?.ingredientExtensions || {},
+        // Carry the import attribution through save. Hand-authored recipes
+        // won't have one — meal-mapper.ts strips `undefined` before write.
+        sourceUrl: recipe?.sourceUrl ?? null,
       };
 
       let recipeId: string;
@@ -918,9 +1027,57 @@ export function RecipeForm({
       </Card>
 
       {/* Steps */}
-      <Card>
+      <Card className={stepsLocked ? "relative" : undefined}>
+        {stepsLocked && (
+          <div className="rounded-t-lg border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+            <strong>Finish ingredient review first.</strong> Map the{" "}
+            {pendingReviewCount} imported ingredient
+            {pendingReviewCount === 1 ? "" : "s"} above before editing steps —
+            AI mapping and timer detection both depend on the final ingredient
+            list.
+          </div>
+        )}
+        {/* fieldset disables all inputs/buttons inside natively — simpler and
+            more accessible than gating each control one by one. */}
+        <fieldset disabled={stepsLocked} className="contents">
         <CardHeader>
-          <CardTitle>Instructions</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>Instructions</CardTitle>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAutoDetectTimers}
+                disabled={!steps.some((s) => s.instruction.trim())}
+                className="gap-1.5"
+                title="Scan each step for phrases like 'for 10 minutes' and fill in the timer automatically. Won't overwrite existing timers."
+              >
+                <Clock className="h-4 w-4 text-primary" />
+                Auto-detect timers
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleMapStepIngredientsWithAI}
+                disabled={
+                  mappingSteps ||
+                  !ingredients.some((i) => i.name.trim()) ||
+                  !steps.some((s) => s.instruction.trim())
+                }
+                className="gap-1.5"
+                title="Use AI to infer which ingredients each step uses and how much."
+              >
+                {mappingSteps ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 text-primary" />
+                )}
+                Map ingredients to steps with AI
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {steps.map((step, index) => (
@@ -1127,6 +1284,7 @@ export function RecipeForm({
             Add Step
           </Button>
         </CardContent>
+        </fieldset>
       </Card>
 
       {/* Notes */}

@@ -20,15 +20,22 @@ import {
   ChevronRight,
   Play,
   Plus,
-  X,
-  Pencil,
   MoreVertical,
   LayoutTemplate,
   Square,
   Loader2,
   Minus,
+  BookOpen,
+  ArrowLeftRight,
+  Trash2,
 } from "lucide-react";
 import { MealPickerDialog } from "./meal-picker-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { addDays, format, parseISO, isToday } from "date-fns";
 import type { PlanInstance, PlanMeal, PlanDay } from "@/lib/types/meal-plan";
 import { MEAL_CATEGORIES, DAYS_OF_WEEK } from "@/lib/types/meal-plan";
@@ -69,6 +76,13 @@ export function WeeklyView({
   // Meal picker state
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<{
+    dayIndex: number;
+    category: string;
+  } | null>(null);
+
+  // Meal action sheet state
+  const [actionOpen, setActionOpen] = useState(false);
+  const [actionTarget, setActionTarget] = useState<{
     dayIndex: number;
     category: string;
   } | null>(null);
@@ -124,6 +138,11 @@ export function WeeklyView({
   function openPicker(dayIndex: number, category: string) {
     setPickerTarget({ dayIndex, category });
     setPickerOpen(true);
+  }
+
+  function openAction(dayIndex: number, category: string) {
+    setActionTarget({ dayIndex, category });
+    setActionOpen(true);
   }
 
   async function handleMealSelect(meal: PlanMeal) {
@@ -292,8 +311,8 @@ export function WeeklyView({
                   meal={meal}
                   cookable={cookable}
                   onTap={() => openPicker(selectedDay, category)}
+                  onMealTap={() => openAction(selectedDay, category)}
                   onCook={() => meal && launchCook(meal.mealId)}
-                  onRemove={() => removeMeal(selectedDay, category)}
                 />
               );
             })}
@@ -349,6 +368,7 @@ export function WeeklyView({
                     meal={meal}
                     cookable={cookable}
                     onTap={() => openPicker(dayIdx, category)}
+                    onMealTap={() => openAction(dayIdx, category)}
                     onCook={() => meal && launchCook(meal.mealId)}
                   />
                 );
@@ -357,6 +377,74 @@ export function WeeklyView({
           ))}
         </div>
       </div>
+
+      {/* Meal action sheet */}
+      <Dialog open={actionOpen} onOpenChange={setActionOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="truncate">
+              {actionTarget
+                ? (getMeal(actionTarget.dayIndex, actionTarget.category)?.mealName ?? "Meal options")
+                : "Meal options"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 pt-1">
+            {actionTarget && (() => {
+              const meal = getMeal(actionTarget.dayIndex, actionTarget.category);
+              return meal ? (
+                <Button
+                  className="w-full justify-start gap-3 h-12"
+                  onClick={() => {
+                    setActionOpen(false);
+                    launchCook(meal.mealId);
+                  }}
+                >
+                  <Play className="h-5 w-5" />
+                  Start cooking
+                </Button>
+              ) : null;
+            })()}
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-3 h-12"
+              onClick={() => {
+                const meal = actionTarget
+                  ? getMeal(actionTarget.dayIndex, actionTarget.category)
+                  : undefined;
+                setActionOpen(false);
+                if (meal) router.push(`/recipes/${meal.mealId}`);
+              }}
+            >
+              <BookOpen className="h-5 w-5" />
+              Go to recipe
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-3 h-12"
+              onClick={() => {
+                const target = actionTarget;
+                setActionOpen(false);
+                if (target) openPicker(target.dayIndex, target.category);
+              }}
+            >
+              <ArrowLeftRight className="h-5 w-5" />
+              Swap for another meal
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-3 h-12 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/5"
+              onClick={() => {
+                const target = actionTarget;
+                setActionOpen(false);
+                if (target) removeMeal(target.dayIndex, target.category);
+              }}
+            >
+              <Trash2 className="h-5 w-5" />
+              Remove from plan
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <MealPickerDialog
         open={pickerOpen}
@@ -446,11 +534,13 @@ function GridCell({
   meal,
   cookable,
   onTap,
+  onMealTap,
   onCook,
 }: {
   meal: PlanMeal | undefined;
   cookable: boolean;
   onTap: () => void;
+  onMealTap: () => void;
   onCook: () => void;
 }) {
   if (!meal) {
@@ -468,7 +558,7 @@ function GridCell({
   return (
     <div
       className="group flex-1 flex flex-col 2xl:flex-row rounded-lg overflow-hidden cursor-pointer min-h-0 border border-border/40 bg-card hover:border-primary/40 hover:shadow-sm transition-all"
-      onClick={onTap}
+      onClick={onMealTap}
     >
       {/* Photo — 65% height in column mode, fixed width in row mode */}
       <div className="relative shrink-0 h-[65%] 2xl:h-full 2xl:w-[120px] overflow-hidden">
@@ -517,15 +607,15 @@ function MobileMealCard({
   meal,
   cookable,
   onTap,
+  onMealTap,
   onCook,
-  onRemove,
 }: {
   category: string;
   meal: PlanMeal | undefined;
   cookable: boolean;
   onTap: () => void;
+  onMealTap: () => void;
   onCook: () => void;
-  onRemove: () => void;
 }) {
   const emoji = CATEGORY_EMOJI[category] ?? "";
 
@@ -550,7 +640,10 @@ function MobileMealCard({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm">
+    <div
+      className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm cursor-pointer hover:border-primary/40 transition-colors"
+      onClick={onMealTap}
+    >
       {/* Photo */}
       {meal.mealPhoto ? (
         <img
@@ -567,7 +660,7 @@ function MobileMealCard({
       )}
 
       {/* Text */}
-      <div className="flex-1 min-w-0" onClick={onTap}>
+      <div className="flex-1 min-w-0">
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
           {emoji} {category}
         </p>
@@ -575,34 +668,16 @@ function MobileMealCard({
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1 shrink-0">
-        {cookable && (
-          <Button
-            variant="default"
-            size="icon"
-            className="h-9 w-9 rounded-full"
-            onClick={onCook}
-          >
-            <Play className="h-4 w-4 ml-0.5" />
-          </Button>
-        )}
+      {cookable && (
         <Button
-          variant="ghost"
+          variant="default"
           size="icon"
-          className="h-8 w-8 text-muted-foreground"
-          onClick={onTap}
+          className="h-9 w-9 rounded-full shrink-0"
+          onClick={(e) => { e.stopPropagation(); onCook(); }}
         >
-          <Pencil className="h-3.5 w-3.5" />
+          <Play className="h-4 w-4 ml-0.5" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-          onClick={onRemove}
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+      )}
     </div>
   );
 }

@@ -23,6 +23,12 @@ export interface DraftIngredient {
 export interface DraftStep {
   order: number;
   instruction: string;
+  // Gemini emits these as required fields (see RECIPE_RESPONSE_SCHEMA) —
+  // `0` / `""` mean "no explicit timer in the source". Typed optional here so
+  // older drafts or hand-constructed DraftRecipes (tests, manual fixtures)
+  // still type-check without having to set placeholder values.
+  timerMinutes?: number;
+  timerLabel?: string;
 }
 
 // The structured recipe the server returns after parsing a source. Mirrors

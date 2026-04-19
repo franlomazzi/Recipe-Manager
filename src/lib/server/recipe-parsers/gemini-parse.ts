@@ -10,6 +10,8 @@
 import type { DraftRecipe } from "@/lib/types/import";
 import { RECIPE_RESPONSE_SCHEMA, SYSTEM_PROMPT } from "./schema";
 import { normalizeToMetric } from "./unit-convert";
+import { fetchRecipePage, normalizeImportUrl, UrlFetchError } from "./fetch-url";
+import { extractRecipeContent } from "./html-extract";
 
 const MODEL = "gemini-2.5-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
@@ -32,10 +34,14 @@ export class GeminiParseError extends Error {
   }
 }
 
-// Gemini's `parts` array is a union. We only emit two shapes right now.
+// Gemini's `parts` array is a union. We emit three shapes:
+//   - text       : prompt + pasted content, fetched HTML, etc.
+//   - fileData   : YouTube URL; Gemini pulls the media itself
+//   - inlineData : user-uploaded image bytes, base64-encoded
 type GeminiPart =
   | { text: string }
-  | { fileData: { fileUri: string; mimeType?: string } };
+  | { fileData: { fileUri: string; mimeType?: string } }
+  | { inlineData: { data: string; mimeType: string } };
 
 interface CallOptions {
   parts: GeminiPart[];
@@ -139,6 +145,7 @@ async function doCallGemini(opts: CallOptions): Promise<DraftRecipe> {
   }
 
   if (opts.sourceUrl) parsed.sourceUrl = opts.sourceUrl;
+
   // Convert US/imperial mass units to metric before handing the draft off.
   // Safe (mass only, deterministic) and leaves an audit note on each
   // converted ingredient so the user can verify on review.
@@ -196,5 +203,113 @@ export async function parseRecipeFromYouTube(
     timeoutMs: YOUTUBE_TIMEOUT_MS,
     sourceUrl: opts.url,
     retryOnNetworkError: true,
+  });
+}
+
+// -------------------------------------------------------------------------
+// URL — we fetch the HTML ourselves, prefer schema.org JSON-LD when the
+// page publishes it, fall back to stripped visible text, then hand to Gemini
+// -------------------------------------------------------------------------
+
+const URL_TIMEOUT_MS = 90_000;
+// Rough cap on the text / JSON-LD blob we hand to Gemini. A huge food blog
+// page stripped to text can run over 100k chars — Gemini still handles it
+// but at real token cost. This truncation is much harsher than for pasted
+// text because URL sources tend to include boilerplate bloat.
+const URL_INPUT_CHARS = 80_000;
+
+interface ParseUrlOptions {
+  url: string;
+}
+
+export async function parseRecipeFromUrl(
+  opts: ParseUrlOptions
+): Promise<DraftRecipe> {
+  const canonical = normalizeImportUrl(opts.url);
+  if (!canonical) {
+    throw new GeminiParseError(
+      "That doesn't look like a valid http(s) recipe URL.",
+      400
+    );
+  }
+
+  let page;
+  try {
+    page = await fetchRecipePage(canonical);
+  } catch (err) {
+    if (err instanceof UrlFetchError) {
+      throw new GeminiParseError(err.message, err.status);
+    }
+    throw err;
+  }
+
+  const extracted = extractRecipeContent(page.html);
+  const truncated =
+    extracted.source.length > URL_INPUT_CHARS
+      ? extracted.source.slice(0, URL_INPUT_CHARS)
+      : extracted.source;
+
+  const preface =
+    extracted.kind === "json-ld"
+      ? "The page provided a schema.org Recipe object. Use its fields directly, splitting the free-text ingredient lines into quantity/unit/name/note per the schema."
+      : "The page's visible text is below. Find the recipe in it and ignore navigation, ads, comments, and unrelated blog text.";
+
+  return callGeminiForRecipe({
+    parts: [
+      {
+        text: `${preface}\n\nSource URL: ${page.finalUrl}\n\n---\n${truncated}\n---`,
+      },
+    ],
+    timeoutMs: URL_TIMEOUT_MS,
+    // Attribute to the final (post-redirect) URL so canonical links are
+    // preserved — users clicking the source line land on the real recipe
+    // page, not whatever shortener / AMP stub they pasted in.
+    sourceUrl: page.finalUrl,
+  });
+}
+
+// -------------------------------------------------------------------------
+// Image — a screenshot or photo of a recipe card. Gemini's multimodal API
+// reads image bytes directly via `inlineData`.
+// -------------------------------------------------------------------------
+
+const IMAGE_TIMEOUT_MS = 120_000;
+
+// Supported image MIME types per Gemini docs. Reject anything else before
+// burning a round-trip.
+const ACCEPTED_IMAGE_MIME = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+
+interface ParseImageOptions {
+  imageBase64: string;
+  mimeType: string;
+}
+
+export async function parseRecipeFromImage(
+  opts: ParseImageOptions
+): Promise<DraftRecipe> {
+  if (!opts.imageBase64) {
+    throw new GeminiParseError("No image data provided.", 400);
+  }
+  if (!ACCEPTED_IMAGE_MIME.has(opts.mimeType)) {
+    throw new GeminiParseError(
+      `Image type "${opts.mimeType}" isn't supported. Use JPEG, PNG, WebP, or HEIC.`,
+      400
+    );
+  }
+
+  return callGeminiForRecipe({
+    parts: [
+      { inlineData: { data: opts.imageBase64, mimeType: opts.mimeType } },
+      {
+        text: "Extract the recipe from this image into structured JSON matching the schema. Read any printed or handwritten text carefully. If the image shows multiple recipes, extract only the most prominent one. If no recipe is visible, return an empty ingredients and steps array so the caller can detect it.",
+      },
+    ],
+    timeoutMs: IMAGE_TIMEOUT_MS,
   });
 }

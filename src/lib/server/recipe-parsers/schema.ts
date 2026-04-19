@@ -120,10 +120,20 @@ export const RECIPE_RESPONSE_SCHEMA = {
           instruction: {
             type: "STRING",
             description:
-              "One cooking step. Keep imperative and concise. Include explicit timings (e.g. 'simmer for 10 minutes') so the app's timer auto-detector can pick them up.",
+              "One cooking step. Keep imperative and concise. Include explicit timings (e.g. 'simmer for 10 minutes') in the text — the timer fields below duplicate that signal in structured form.",
+          },
+          timerMinutes: {
+            type: "INTEGER",
+            description:
+              "If the step has an explicit, bounded cooking time (e.g. 'bake for 30 minutes', 'simmer 10-12 minutes'), set this to the duration in whole minutes. For ranges, use the upper bound so the cook isn't caught short. Use 0 when the step has no explicit time or only vague cues like 'until golden', 'to taste', 'overnight'. Do NOT guess — only set when the source gives a number.",
+          },
+          timerLabel: {
+            type: "STRING",
+            description:
+              "Short label for the timer, 1-3 words, imperative verb preferred (e.g. 'Simmer', 'Bake', 'Rest', 'Proof'). Empty string when timerMinutes is 0.",
           },
         },
-        required: ["order", "instruction"],
+        required: ["order", "instruction", "timerMinutes", "timerLabel"],
       },
     },
   },
@@ -147,5 +157,5 @@ export const SYSTEM_PROMPT = `You convert raw recipe content (pasted text, webpa
 - If the source is not a recipe, return a schema-valid response with an empty ingredients array and steps array so the caller can detect it.
 - Normalize units to the allowed enum. Convert grams of weight to 'g', milliliters to 'ml', etc. If the source gives both metric and imperial, prefer metric.
 - Split compound ingredient lines like '2 cups flour, sifted' into quantity=2, unit='cup', name='flour', note='sifted'.
-- Steps should read as imperative cooking actions. Preserve any explicit timings in the step text so the app can auto-detect timers.
+- Steps should read as imperative cooking actions. Preserve any explicit timings in the step text, and mirror them in the structured timerMinutes / timerLabel fields. Only set timerMinutes when the source names a concrete duration — leave it at 0 for vague cues like "until golden", "to taste", or "overnight". For ranges like "10-12 minutes", use the upper bound.
 - Use 0 for unknown times and 4 for unknown servings. Do not leave numbers blank.`;

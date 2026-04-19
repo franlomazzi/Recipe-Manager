@@ -3,6 +3,8 @@ import { verifyAuthorizedCaller } from "@/lib/firebase/admin";
 import {
   parseRecipeFromText,
   parseRecipeFromYouTube,
+  parseRecipeFromUrl,
+  parseRecipeFromImage,
   GeminiParseError,
 } from "@/lib/server/recipe-parsers/gemini-parse";
 import { normalizeYouTubeUrl } from "@/lib/server/recipe-parsers/youtube-url";
@@ -14,15 +16,14 @@ import type { ImportSource } from "@/lib/types/import";
 // token whose uid is on the whitelist in src/lib/firebase/admin.ts. This
 // gates all Gemini quota burn.
 //
-// PAYLOAD: { source: ImportSource }.
-// v1 only handles source.type === "text". url/image/youtube return 400 so
-// the client can detect an outdated build cleanly.
-//
+// PAYLOAD: { source: ImportSource } — one of text, youtube, url, image.
 // The Gemini API key never leaves the server.
 
-// Hard limit on request body size. 250 KB is enormous for a recipe paste; if
-// we ever legitimately need more, the image source (phase 3) will bump this.
-const MAX_BODY_BYTES = 256 * 1024;
+// Hard limit on request body size. Bumped to 12 MB so the image source has
+// headroom — base64 inflation gives a 12MB body roughly 8-9MB of raw image,
+// which is plenty for phone photos without being extravagant. Text/URL/YT
+// sources will never come close to this.
+const MAX_BODY_BYTES = 12 * 1024 * 1024;
 
 export async function POST(req: Request) {
   try {
@@ -80,10 +81,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ draft });
     }
 
-    // URL / image arrive in later phases; fail explicitly until then so a
-    // stale client surfaces a useful error instead of a silent hang.
+    if (source.type === "url") {
+      const draft = await parseRecipeFromUrl({ url: source.url ?? "" });
+      return NextResponse.json({ draft });
+    }
+
+    if (source.type === "image") {
+      const draft = await parseRecipeFromImage({
+        imageBase64: source.imageBase64 ?? "",
+        mimeType: source.mimeType ?? "",
+      });
+      return NextResponse.json({ draft });
+    }
+
+    // Exhaustiveness guard — if a future ImportSource variant lands without
+    // a handler, the client gets a clean error instead of a silent hang.
     return NextResponse.json(
-      { error: `Source type "${source.type}" is not supported yet.` },
+      {
+        error: `Source type "${(source as { type: string }).type}" is not supported yet.`,
+      },
       { status: 400 }
     );
   } catch (err) {

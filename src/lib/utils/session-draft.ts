@@ -1,6 +1,7 @@
 import type { DraftRecipe } from "@/lib/types/import";
 import type { Recipe, Ingredient, Step } from "@/lib/types/recipe";
 import type { Timestamp } from "firebase/firestore";
+import { detectTimer } from "@/lib/utils/timer-detector";
 
 // One-shot handoff of an imported recipe draft from the import modal to the
 // new-recipe page. sessionStorage (not localStorage) so it clears when the
@@ -50,17 +51,30 @@ export function draftToRecipeForForm(draft: DraftRecipe): Recipe {
   const steps: Step[] = draft.steps
     .slice()
     .sort((a, b) => a.order - b.order)
-    .map((s, i) => ({
-      id: crypto.randomUUID(),
-      order: i + 1,
-      instruction: s.instruction ?? "",
-      // Timer auto-detection runs inside RecipeForm the first time the user
-      // touches an instruction, but we can do a cheap pre-pass too. Leaving
-      // null here keeps things simple; the form recomputes on edit.
-      timerMinutes: null,
-      timerLabel: null,
-      ingredients: [],
-    }));
+    .map((s, i) => {
+      const instruction = s.instruction ?? "";
+      // Prefer the timer Gemini emitted in its structured response — it has
+      // the full step context (ranges, "bake until set for ~25 min", etc.)
+      // and is the authoritative signal. Fall back to the regex detector
+      // only when Gemini left the field blank (0 means "no explicit time"
+      // per the schema prompt). Belt-and-braces: covers older drafts and
+      // any step the model missed.
+      const aiMinutes =
+        typeof s.timerMinutes === "number" && s.timerMinutes > 0
+          ? s.timerMinutes
+          : null;
+      const aiLabel =
+        aiMinutes !== null && s.timerLabel ? s.timerLabel : null;
+      const detected = aiMinutes === null ? detectTimer(instruction) : null;
+      return {
+        id: crypto.randomUUID(),
+        order: i + 1,
+        instruction,
+        timerMinutes: aiMinutes ?? detected?.minutes ?? null,
+        timerLabel: aiLabel ?? detected?.label ?? null,
+        ingredients: [],
+      };
+    });
 
   return {
     id: "",
