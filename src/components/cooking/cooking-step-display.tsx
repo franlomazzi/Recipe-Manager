@@ -491,7 +491,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
             )}
 
             {/* Step note — focus mode */}
-            <div className="mt-8 w-full max-w-lg">
+            <div className="mt-8 w-full max-w-lg mx-auto">
               {activeNoteStep === currentStep ? (
                 <textarea
                   autoFocus
@@ -502,12 +502,12 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                     if (!stepNotes[currentStep]?.trim()) setActiveNoteStep(null);
                   }}
                   rows={2}
-                  className="w-full resize-none rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+                  className="w-full resize-none rounded-xl border-2 border-primary/40 bg-card px-4 py-3 text-sm outline-none focus:border-primary"
                 />
               ) : stepNotes[currentStep]?.trim() ? (
                 <button
                   onClick={() => setActiveNoteStep(currentStep)}
-                  className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3"
+                  className="w-full text-left rounded-xl border-2 border-amber-500/50 bg-amber-500/10 px-4 py-3"
                 >
                   <div className="flex items-start gap-2">
                     <StickyNote className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
@@ -517,7 +517,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
               ) : (
                 <button
                   onClick={() => setActiveNoteStep(currentStep)}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-muted px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
                 >
                   <StickyNote className="h-4 w-4" />
                   Add a note for this step
@@ -591,22 +591,6 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                           {virtualIndex}
                         </div>
                         <div className="flex-1 min-w-0">
-                          {/* Note icon button — always visible in card header */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveNoteStep(activeNoteStep === virtualIndex ? null : virtualIndex);
-                            }}
-                            className={cn(
-                              "float-right ml-2 flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
-                              stepNotes[virtualIndex]?.trim()
-                                ? "bg-amber-500/15 text-amber-600"
-                                : "text-muted-foreground/50 hover:bg-muted hover:text-foreground"
-                            )}
-                            title="Add step note"
-                          >
-                            <StickyNote className="h-3.5 w-3.5" />
-                          </button>
                           <p
                             className={cn(
                               "font-medium leading-relaxed",
@@ -658,37 +642,49 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                             );
                           })()}
 
-                          {/* Step note — inline editor */}
-                          {activeNoteStep === virtualIndex && (
-                            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                              <textarea
-                                autoFocus
-                                placeholder="Add a note for this step..."
-                                value={stepNotes[virtualIndex] || ""}
-                                onChange={(e) =>
-                                  setStepNote(recipe.id, virtualIndex, e.target.value)
-                                }
-                                onBlur={() => {
-                                  if (!stepNotes[virtualIndex]?.trim())
-                                    setActiveNoteStep(null);
+                          {/* Step note */}
+                          <div className="mt-3">
+                            {activeNoteStep === virtualIndex ? (
+                              <div onClick={(e) => e.stopPropagation()}>
+                                <textarea
+                                  autoFocus
+                                  placeholder="Add a note for this step..."
+                                  value={stepNotes[virtualIndex] || ""}
+                                  onChange={(e) =>
+                                    setStepNote(recipe.id, virtualIndex, e.target.value)
+                                  }
+                                  onBlur={() => {
+                                    if (!stepNotes[virtualIndex]?.trim())
+                                      setActiveNoteStep(null);
+                                  }}
+                                  rows={2}
+                                  className="w-full resize-none rounded-lg border-2 border-primary/40 bg-card px-3 py-2 text-xs outline-none focus:border-primary"
+                                />
+                              </div>
+                            ) : stepNotes[virtualIndex]?.trim() ? (
+                              <div
+                                className="flex items-start gap-1.5 rounded-lg border-2 border-amber-500/40 bg-amber-500/10 px-2.5 py-2 cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveNoteStep(virtualIndex);
                                 }}
-                                rows={2}
-                                className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-primary/40"
-                              />
-                            </div>
-                          )}
-                          {activeNoteStep !== virtualIndex && stepNotes[virtualIndex]?.trim() && (
-                            <div
-                              className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 cursor-pointer"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveNoteStep(virtualIndex);
-                              }}
-                            >
-                              <StickyNote className="h-3 w-3 shrink-0 mt-0.5 text-amber-600" />
-                              <span className="text-[11px]">{stepNotes[virtualIndex]}</span>
-                            </div>
-                          )}
+                              >
+                                <StickyNote className="h-3 w-3 shrink-0 mt-0.5 text-amber-600" />
+                                <span className="text-[11px]">{stepNotes[virtualIndex]}</span>
+                              </div>
+                            ) : (
+                              <button
+                                className="flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveNoteStep(virtualIndex);
+                                }}
+                              >
+                                <StickyNote className="h-3 w-3" />
+                                Add note
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

@@ -264,7 +264,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
                 if (!stepNotes[currentStep]?.trim()) setActiveNoteStep(null);
               }}
               rows={2}
-              className="w-full resize-none rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full resize-none rounded-xl border-2 border-primary/40 bg-card px-4 py-3 text-sm outline-none focus:border-primary"
             />
           ) : stepNotes[currentStep]?.trim() ? (
             <button
@@ -279,7 +279,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
           ) : (
             <button
               onClick={() => setActiveNoteStep(currentStep)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-muted px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
             >
               <StickyNote className="h-4 w-4" />
               Add a note for this step
