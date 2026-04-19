@@ -18,6 +18,7 @@ import {
   Pause,
   RotateCcw,
   StickyNote,
+  Check,
 } from "lucide-react";
 import { useCookingSession } from "@/lib/contexts/cooking-session-context";
 import type { CookingSession } from "@/lib/types/cooking-session";
@@ -660,6 +661,17 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                                   rows={2}
                                   className="w-full resize-none rounded-lg border-2 border-primary/40 bg-card px-3 py-2 text-xs outline-none focus:border-primary"
                                 />
+                                <div className="flex justify-end mt-1.5">
+                                  <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => setActiveNoteStep(null)}
+                                    className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                                  >
+                                    <Check className="h-3 w-3" />
+                                    Confirm
+                                  </button>
+                                </div>
                               </div>
                             ) : stepNotes[virtualIndex]?.trim() ? (
                               <div

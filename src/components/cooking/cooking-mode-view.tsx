@@ -19,6 +19,7 @@ import {
   Plus,
   Lightbulb,
   StickyNote,
+  Check,
 } from "lucide-react";
 import { ImprovementSuggestions } from "@/components/recipe/improvement-suggestions";
 import type { Recipe, CookLog } from "@/lib/types/recipe";
@@ -255,17 +256,30 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
         {/* Step note */}
         <div className="mt-8 w-full max-w-lg">
           {activeNoteStep === currentStep ? (
-            <textarea
-              autoFocus
-              placeholder="Add a note for this step..."
-              value={stepNotes[currentStep] || ""}
-              onChange={(e) => setStepNote(currentStep, e.target.value)}
-              onBlur={() => {
-                if (!stepNotes[currentStep]?.trim()) setActiveNoteStep(null);
-              }}
-              rows={2}
-              className="w-full resize-none rounded-xl border-2 border-primary/40 bg-card px-4 py-3 text-sm outline-none focus:border-primary"
-            />
+            <div>
+              <textarea
+                autoFocus
+                placeholder="Add a note for this step..."
+                value={stepNotes[currentStep] || ""}
+                onChange={(e) => setStepNote(currentStep, e.target.value)}
+                onBlur={() => {
+                  if (!stepNotes[currentStep]?.trim()) setActiveNoteStep(null);
+                }}
+                rows={2}
+                className="w-full resize-none rounded-xl border-2 border-primary/40 bg-card px-4 py-3 text-sm outline-none focus:border-primary"
+              />
+              <div className="flex justify-end mt-2">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setActiveNoteStep(null)}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Check className="h-4 w-4" />
+                  Confirm
+                </button>
+              </div>
+            </div>
           ) : stepNotes[currentStep]?.trim() ? (
             <button
               onClick={() => setActiveNoteStep(currentStep)}

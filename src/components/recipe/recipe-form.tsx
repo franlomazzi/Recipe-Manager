@@ -52,6 +52,23 @@ import { saveIngredientToLibrary } from "@/lib/firebase/ingredient-library";
 import { IngredientCombobox } from "@/components/recipe/ingredient-combobox";
 import { findLibraryMatches } from "@/lib/utils/ingredient-match";
 import { CheckCircle2, Package } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface RecipeFormProps {
   recipe?: Recipe;
@@ -97,6 +114,229 @@ function createEmptyStep(order: number): Step {
   };
 }
 
+interface SortableStepCardProps {
+  step: Step;
+  index: number;
+  isOnly: boolean;
+  ingredients: Ingredient[];
+  onUpdateStep: (index: number, field: keyof Step, value: string | number | null) => void;
+  onToggleTimer: (index: number) => void;
+  onRemoveStep: (index: number) => void;
+  onAddStepIngredient: (stepIndex: number, ingredientId: string) => void;
+  onUpdateStepIngredient: (stepIndex: number, ingredientId: string, quantity: number | null) => void;
+  onRemoveStepIngredient: (stepIndex: number, ingredientId: string) => void;
+  getUsedQuantity: (ingredientId: string, excludeStepIndex?: number) => number;
+  disabled?: boolean;
+}
+
+function SortableStepCard({
+  step,
+  index,
+  isOnly,
+  ingredients,
+  onUpdateStep,
+  onToggleTimer,
+  onRemoveStep,
+  onAddStepIngredient,
+  onUpdateStepIngredient,
+  onRemoveStepIngredient,
+  getUsedQuantity,
+  disabled,
+}: SortableStepCardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: step.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 1 : undefined,
+      }}
+      className="relative rounded-lg border border-border bg-muted/30 p-4"
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={`touch-none self-center text-muted-foreground/40 transition-colors ${disabled ? "cursor-default opacity-30" : "cursor-grab active:cursor-grabbing hover:text-muted-foreground"}`}
+          {...(!disabled ? { ...attributes, ...listeners } : {})}
+          aria-label="Drag to reorder step"
+        >
+          <GripVertical className="h-5 w-5" />
+        </div>
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+          {index + 1}
+        </div>
+        <div className="flex-1 space-y-3">
+          <Textarea
+            placeholder={`Describe step ${index + 1}... (e.g., "Preheat oven to 375°F")`}
+            value={step.instruction}
+            onChange={(e) => onUpdateStep(index, "instruction", e.target.value)}
+            rows={2}
+            className="bg-background"
+          />
+
+          {/* Timer controls */}
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant={step.timerMinutes ? "default" : "outline"}
+              size="sm"
+              onClick={() => onToggleTimer(index)}
+              className="gap-1.5"
+            >
+              <Clock className="h-3.5 w-3.5" />
+              {step.timerMinutes ? "Timer on" : "Add timer"}
+            </Button>
+
+            {step.timerMinutes !== null && step.timerMinutes !== undefined && (
+              <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1">
+                <Input
+                  type="number"
+                  min="1"
+                  value={step.timerMinutes}
+                  onChange={(e) =>
+                    onUpdateStep(index, "timerMinutes", parseInt(e.target.value) || 1)
+                  }
+                  className="h-7 w-16 border-0 bg-transparent p-0 text-center text-sm"
+                />
+                <span className="text-xs text-muted-foreground">min</span>
+                <Separator orientation="vertical" className="h-4" />
+                <Input
+                  type="text"
+                  placeholder="Label"
+                  value={step.timerLabel || ""}
+                  onChange={(e) => onUpdateStep(index, "timerLabel", e.target.value)}
+                  className="h-7 w-24 border-0 bg-transparent p-0 text-sm"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Step ingredients */}
+          <div className="space-y-2">
+            {step.ingredients.length > 0 && (
+              <div className="space-y-1.5">
+                {step.ingredients.map((si) => {
+                  const ing = ingredients.find((i) => i.id === si.ingredientId);
+                  if (!ing) return null;
+                  const usedElsewhere = getUsedQuantity(si.ingredientId, index);
+                  const maxAvailable =
+                    ing.quantity !== null
+                      ? Math.max(0, ing.quantity - usedElsewhere)
+                      : null;
+                  return (
+                    <div
+                      key={si.ingredientId}
+                      className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5"
+                    >
+                      <span className="text-sm truncate flex-1 min-w-0">
+                        {ing.name}
+                        {ing.unit && (
+                          <span className="text-muted-foreground"> ({ing.unit})</span>
+                        )}
+                      </span>
+                      {ing.quantity !== null && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Input
+                            type="number"
+                            step="any"
+                            min="0"
+                            max={maxAvailable ?? undefined}
+                            value={si.quantity ?? ""}
+                            placeholder="Qty"
+                            onChange={(e) =>
+                              onUpdateStepIngredient(
+                                index,
+                                si.ingredientId,
+                                e.target.value ? parseFloat(e.target.value) : null
+                              )
+                            }
+                            className="h-7 w-16 text-center text-sm"
+                          />
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            / {maxAvailable}
+                          </span>
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => onRemoveStepIngredient(index, si.ingredientId)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Add ingredient dropdown */}
+            {ingredients.some(
+              (ing) =>
+                ing.name.trim() &&
+                !step.ingredients.some((si) => si.ingredientId === ing.id)
+            ) && (
+              <Select
+                value=""
+                onValueChange={(id) => id && onAddStepIngredient(index, id)}
+              >
+                <SelectTrigger className="h-8 w-auto max-w-[260px] text-xs gap-1.5">
+                  <ShoppingBasket className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <SelectValue placeholder="Add ingredient to step..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {ingredients
+                    .filter(
+                      (ing) =>
+                        ing.name.trim() &&
+                        !step.ingredients.some((si) => si.ingredientId === ing.id)
+                    )
+                    .map((ing) => {
+                      const remaining =
+                        ing.quantity !== null
+                          ? ing.quantity - getUsedQuantity(ing.id)
+                          : null;
+                      return (
+                        <SelectItem
+                          key={ing.id}
+                          value={ing.id}
+                          disabled={remaining !== null && remaining <= 0}
+                        >
+                          {ing.name}
+                          {ing.quantity !== null && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              — {remaining} {ing.unit} left
+                            </span>
+                          )}
+                        </SelectItem>
+                      );
+                    })}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={() => onRemoveStep(index)}
+          disabled={isOnly}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function RecipeForm({
   recipe,
   improvements,
@@ -132,6 +372,21 @@ export function RecipeForm({
   const [steps, setSteps] = useState<Step[]>(
     recipe?.steps?.length ? recipe.steps : [createEmptyStep(1)]
   );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  function reorderSteps(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setSteps((prev) => {
+      const oldIndex = prev.findIndex((s) => s.id === active.id);
+      const newIndex = prev.findIndex((s) => s.id === over.id);
+      return arrayMove(prev, oldIndex, newIndex).map((s, i) => ({ ...s, order: i + 1 }));
+    });
+  }
   // Review status keyed by ingredient.id. Only populated when the caller asked
   // for review (import flow). New ingredients added during this session are
   // never added here — they're assumed intentional.
@@ -1080,205 +1335,34 @@ export function RecipeForm({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {steps.map((step, index) => (
-            <div
-              key={step.id}
-              className="relative rounded-lg border border-border bg-muted/30 p-4"
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={reorderSteps}
+          >
+            <SortableContext
+              items={steps.map((s) => s.id)}
+              strategy={verticalListSortingStrategy}
             >
-              <div className="flex items-start gap-3">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                  {index + 1}
-                </div>
-                <div className="flex-1 space-y-3">
-                  <Textarea
-                    placeholder={`Describe step ${index + 1}... (e.g., "Preheat oven to 375°F")`}
-                    value={step.instruction}
-                    onChange={(e) => updateStep(index, "instruction", e.target.value)}
-                    rows={2}
-                    className="bg-background"
-                  />
-
-                  {/* Timer controls */}
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant={step.timerMinutes ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => toggleStepTimer(index)}
-                      className="gap-1.5"
-                    >
-                      <Clock className="h-3.5 w-3.5" />
-                      {step.timerMinutes ? "Timer on" : "Add timer"}
-                    </Button>
-
-                    {step.timerMinutes !== null && step.timerMinutes !== undefined && (
-                      <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1">
-                        <Input
-                          type="number"
-                          min="1"
-                          value={step.timerMinutes}
-                          onChange={(e) =>
-                            updateStep(index, "timerMinutes", parseInt(e.target.value) || 1)
-                          }
-                          className="h-7 w-16 border-0 bg-transparent p-0 text-center text-sm"
-                        />
-                        <span className="text-xs text-muted-foreground">min</span>
-                        <Separator orientation="vertical" className="h-4" />
-                        <Input
-                          type="text"
-                          placeholder="Label"
-                          value={step.timerLabel || ""}
-                          onChange={(e) => updateStep(index, "timerLabel", e.target.value)}
-                          className="h-7 w-24 border-0 bg-transparent p-0 text-sm"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Step ingredients */}
-                  <div className="space-y-2">
-                    {step.ingredients.length > 0 && (
-                      <div className="space-y-1.5">
-                        {step.ingredients.map((si) => {
-                          const ing = ingredients.find(
-                            (i) => i.id === si.ingredientId
-                          );
-                          if (!ing) return null;
-                          const usedElsewhere = getUsedQuantity(
-                            si.ingredientId,
-                            index
-                          );
-                          const maxAvailable =
-                            ing.quantity !== null
-                              ? Math.max(
-                                  0,
-                                  ing.quantity - usedElsewhere
-                                )
-                              : null;
-                          return (
-                            <div
-                              key={si.ingredientId}
-                              className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5"
-                            >
-                              <span className="text-sm truncate flex-1 min-w-0">
-                                {ing.name}
-                                {ing.unit && (
-                                  <span className="text-muted-foreground">
-                                    {" "}
-                                    ({ing.unit})
-                                  </span>
-                                )}
-                              </span>
-                              {ing.quantity !== null && (
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <Input
-                                    type="number"
-                                    step="any"
-                                    min="0"
-                                    max={maxAvailable ?? undefined}
-                                    value={si.quantity ?? ""}
-                                    placeholder="Qty"
-                                    onChange={(e) =>
-                                      updateStepIngredient(
-                                        index,
-                                        si.ingredientId,
-                                        e.target.value
-                                          ? parseFloat(e.target.value)
-                                          : null
-                                      )
-                                    }
-                                    className="h-7 w-16 text-center text-sm"
-                                  />
-                                  <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                    / {maxAvailable}
-                                  </span>
-                                </div>
-                              )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-                                onClick={() =>
-                                  removeStepIngredient(
-                                    index,
-                                    si.ingredientId
-                                  )
-                                }
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Add ingredient dropdown */}
-                    {ingredients.some(
-                      (ing) =>
-                        ing.name.trim() &&
-                        !step.ingredients.some(
-                          (si) => si.ingredientId === ing.id
-                        )
-                    ) && (
-                      <Select
-                        value=""
-                        onValueChange={(id) => id && addStepIngredient(index, id)}
-                      >
-                        <SelectTrigger className="h-8 w-auto max-w-[260px] text-xs gap-1.5">
-                          <ShoppingBasket className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <SelectValue placeholder="Add ingredient to step..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ingredients
-                            .filter(
-                              (ing) =>
-                                ing.name.trim() &&
-                                !step.ingredients.some(
-                                  (si) => si.ingredientId === ing.id
-                                )
-                            )
-                            .map((ing) => {
-                              const remaining =
-                                ing.quantity !== null
-                                  ? ing.quantity -
-                                    getUsedQuantity(ing.id)
-                                  : null;
-                              return (
-                                <SelectItem
-                                  key={ing.id}
-                                  value={ing.id}
-                                  disabled={remaining !== null && remaining <= 0}
-                                >
-                                  {ing.name}
-                                  {ing.quantity !== null && (
-                                    <span className="text-muted-foreground">
-                                      {" "}
-                                      — {remaining} {ing.unit} left
-                                    </span>
-                                  )}
-                                </SelectItem>
-                              );
-                            })}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => removeStep(index)}
-                  disabled={steps.length === 1}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
+              {steps.map((step, index) => (
+                <SortableStepCard
+                  key={step.id}
+                  step={step}
+                  index={index}
+                  isOnly={steps.length === 1}
+                  ingredients={ingredients}
+                  onUpdateStep={updateStep}
+                  onToggleTimer={toggleStepTimer}
+                  onRemoveStep={removeStep}
+                  onAddStepIngredient={addStepIngredient}
+                  onUpdateStepIngredient={updateStepIngredient}
+                  onRemoveStepIngredient={removeStepIngredient}
+                  getUsedQuantity={getUsedQuantity}
+                  disabled={stepsLocked}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
           <Button type="button" variant="outline" size="sm" onClick={addStep}>
             <Plus className="mr-2 h-4 w-4" />
             Add Step
