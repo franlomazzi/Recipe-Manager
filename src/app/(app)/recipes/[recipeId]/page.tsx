@@ -652,6 +652,25 @@ export default function RecipeDetailPage() {
                         )}
                       </div>
                     )}
+                    {step.ingredients.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {step.ingredients.map((si) => {
+                          const ing = recipe.ingredients.find((i) => i.id === si.ingredientId);
+                          if (!ing) return null;
+                          return (
+                            <Badge key={si.ingredientId} variant="secondary" className="text-xs font-normal">
+                              {si.quantity !== null
+                                ? `${scaleQuantity(si.quantity)} `
+                                : ing.quantity !== null
+                                ? `${scaleQuantity(ing.quantity)} `
+                                : ""}
+                              {ing.unit && `${ing.unit} `}
+                              {ing.name}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
