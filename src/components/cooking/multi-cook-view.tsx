@@ -95,7 +95,7 @@ export function MultiCookView() {
       </div>
 
       {/* Active session content */}
-      <div className="flex flex-1 flex-col overflow-y-auto">
+      <div className="flex flex-1 flex-col overflow-hidden">
         <CookingStepDisplay key={activeSession.recipeId} session={activeSession} />
       </div>
 

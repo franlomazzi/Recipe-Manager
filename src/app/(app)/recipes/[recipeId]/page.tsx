@@ -265,8 +265,8 @@ export default function RecipeDetailPage() {
           disabled={recipe.ingredients.length === 0}
           title={recipe.ingredients.length === 0 ? "No ingredients to add" : "Add to shopping list"}
         >
-          <ShoppingCart className="mr-2 h-4 w-4" />
-          Add to shopping list
+          <ShoppingCart className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Add to shopping list</span>
         </Button>
         <ShareRecipeToggle
           recipeId={recipe.id}
@@ -275,14 +275,14 @@ export default function RecipeDetailPage() {
         />
         {isMine && (
           <Button variant="outline" size="sm" className="rounded-xl" render={<Link href={`/recipes/${recipe.id}/edit`} />}>
-            <Edit className="mr-2 h-4 w-4" />
-            Edit
+            <Edit className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Edit</span>
           </Button>
         )}
         {isCurrentlyCooking ? (
           <Button className="rounded-xl" render={<Link href="/cook" />}>
             <ChefHat className="mr-2 h-4 w-4" />
-            Back to cooking
+            <span className="hidden sm:inline">Back to </span>cooking
           </Button>
         ) : (
           <Button
