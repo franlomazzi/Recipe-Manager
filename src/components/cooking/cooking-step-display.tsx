@@ -332,7 +332,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
 
   return (
     <div
-      className="flex flex-1 flex-col"
+      className="flex flex-1 flex-col min-h-0"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >

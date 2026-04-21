@@ -23,6 +23,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -112,6 +120,165 @@ function createEmptyStep(order: number): Step {
     timerLabel: null,
     ingredients: [],
   };
+}
+
+interface SortableIngredientRowProps {
+  ing: Ingredient;
+  index: number;
+  isOnly: boolean;
+  review: IngredientReview | undefined;
+  original: { quantity: number | null; unit: string; name: string } | undefined;
+  libraryItems: LibraryIngredient[];
+  onUpdateIngredient: (index: number, field: keyof Ingredient, value: string | number | null) => void;
+  onRemove: (index: number) => void;
+  onSelectLibraryItem: (index: number, item: LibraryIngredient) => void;
+  onPickMatch: (index: number, item: LibraryIngredient) => void;
+  onKeepAsNew: (ingredientId: string) => void;
+  onReopenReview: (ingredientId: string) => void;
+  onRestore: (index: number, original: { quantity: number | null; unit: string }) => void;
+}
+
+function SortableIngredientRow({
+  ing,
+  index,
+  isOnly,
+  review,
+  original,
+  libraryItems,
+  onUpdateIngredient,
+  onRemove,
+  onSelectLibraryItem,
+  onPickMatch,
+  onKeepAsNew,
+  onReopenReview,
+  onRestore,
+}: SortableIngredientRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: ing.id });
+
+  const isPending = review?.type === "pending";
+  const isMatched = review?.type === "matched";
+  const isNew = review?.type === "new";
+  const hasDrifted =
+    !!original &&
+    (original.quantity !== ing.quantity ||
+      original.unit !== ing.unit ||
+      original.name !== ing.name);
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 1 : undefined,
+      }}
+      className={
+        isPending
+          ? "rounded-md border-l-4 border-amber-500 bg-amber-500/5 p-2"
+          : isMatched || isNew
+            ? "rounded-md border-l-4 border-emerald-500/60 bg-emerald-500/5 p-2"
+            : ""
+      }
+    >
+      <div className="flex items-start gap-2">
+        <div
+          className="mt-2.5 hidden cursor-grab active:cursor-grabbing touch-none text-muted-foreground/50 hover:text-muted-foreground transition-colors sm:block"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4 shrink-0" />
+        </div>
+        <div className="grid flex-1 grid-cols-6 sm:grid-cols-12 gap-2">
+          <Input
+            className="col-span-2"
+            placeholder="Qty"
+            type="number"
+            step="any"
+            min="0"
+            value={ing.quantity ?? ""}
+            onChange={(e) =>
+              onUpdateIngredient(index, "quantity", e.target.value ? parseFloat(e.target.value) : null)
+            }
+          />
+          <UnitCombobox
+            className="col-span-2"
+            value={ing.unit}
+            onValueChange={(v) => onUpdateIngredient(index, "unit", v)}
+          />
+          <IngredientCombobox
+            className="col-span-2 sm:col-span-5"
+            value={ing.name}
+            libraryItems={libraryItems}
+            onSelectLibraryItem={(item) => onSelectLibraryItem(index, item)}
+            onNameChange={(name) => onUpdateIngredient(index, "name", name)}
+          />
+          <Input
+            className="col-span-5 sm:col-span-3"
+            placeholder="Note (optional)"
+            value={ing.note}
+            onChange={(e) => onUpdateIngredient(index, "note", e.target.value)}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="mt-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={() => onRemove(index)}
+          disabled={isOnly}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {original && (isPending || isMatched) && hasDrifted && (
+        <ImportReference
+          original={original}
+          current={{ quantity: ing.quantity, unit: ing.unit, name: ing.name }}
+          onRestore={() => onRestore(index, original)}
+        />
+      )}
+
+      {isPending && (
+        <ReviewPanel
+          name={ing.name}
+          library={libraryItems}
+          onPickMatch={(item) => onPickMatch(index, item)}
+          onKeepAsNew={() => onKeepAsNew(ing.id)}
+        />
+      )}
+
+      {(isMatched || isNew) && (
+        <div className="mt-2 ml-6 flex items-center gap-2 text-xs">
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+          <span className="text-muted-foreground">
+            {isMatched ? (
+              <>
+                Mapped to library ingredient{" "}
+                <span className="font-medium text-foreground">{ing.name}</span>
+              </>
+            ) : (
+              <>
+                Will be saved as a{" "}
+                <span className="font-medium text-foreground">new library ingredient</span>
+              </>
+            )}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => onReopenReview(ing.id)}
+          >
+            Change
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface SortableStepCardProps {
@@ -429,6 +596,8 @@ export function RecipeForm({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(recipe?.photoURL || null);
   const [saving, setSaving] = useState(false);
+  const [showVersionDialog, setShowVersionDialog] = useState(false);
+  const [pendingRecipeData, setPendingRecipeData] = useState<Partial<Omit<Recipe, "id" | "userId" | "createdAt">> | null>(null);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [generatingPhoto, setGeneratingPhoto] = useState(false);
@@ -571,6 +740,16 @@ export function RecipeForm({
 
   function removeIngredient(index: number) {
     setIngredients((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function reorderIngredients(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setIngredients((prev) => {
+      const oldIndex = prev.findIndex((i) => i.id === active.id);
+      const newIndex = prev.findIndex((i) => i.id === over.id);
+      return arrayMove(prev, oldIndex, newIndex);
+    });
   }
 
   function updateStep(index: number, field: keyof Step, value: string | number | null) {
@@ -815,94 +994,118 @@ export function RecipeForm({
       return;
     }
 
+    const prep = parseInt(prepTime) || 0;
+    const cook = parseInt(cookTime) || 0;
+
+    const recipeData = {
+      title: title.trim(),
+      description: description.trim(),
+      prepTime: prep,
+      cookTime: cook,
+      totalTime: prep + cook,
+      servings: parseInt(servings) || 4,
+      difficulty,
+      categories,
+      notes: notes.trim(),
+      isFavorite: recipe?.isFavorite || false,
+      version: recipe?.version || 1,
+      parentRecipeId: recipe?.parentRecipeId || null,
+      parentRecipeTitle: recipe?.parentRecipeTitle || null,
+      forkedFromVersion: recipe?.forkedFromVersion || null,
+      rating: recipe?.rating || null,
+      cookCount: recipe?.cookCount || 0,
+      ingredients: validIngredients,
+      steps: validSteps,
+      searchTerms: generateSearchTerms(title, categories),
+      photoURL: recipe?.photoURL || null,
+      photoStoragePath: recipe?.photoStoragePath || null,
+      ingredientExtensions: recipe?.ingredientExtensions || {},
+      // Carry the import attribution through save. Hand-authored recipes
+      // won't have one — meal-mapper.ts strips `undefined` before write.
+      sourceUrl: recipe?.sourceUrl ?? null,
+    };
+
+    if (isEditing) {
+      setPendingRecipeData(recipeData);
+      setShowVersionDialog(true);
+      return;
+    }
+
     setSaving(true);
-
     try {
-      const prep = parseInt(prepTime) || 0;
-      const cook = parseInt(cookTime) || 0;
-
-      const recipeData = {
-        title: title.trim(),
-        description: description.trim(),
-        prepTime: prep,
-        cookTime: cook,
-        totalTime: prep + cook,
-        servings: parseInt(servings) || 4,
-        difficulty,
-        categories,
-        notes: notes.trim(),
-        isFavorite: recipe?.isFavorite || false,
-        version: recipe?.version || 1,
-        parentRecipeId: recipe?.parentRecipeId || null,
-        parentRecipeTitle: recipe?.parentRecipeTitle || null,
-        forkedFromVersion: recipe?.forkedFromVersion || null,
-        rating: recipe?.rating || null,
-        cookCount: recipe?.cookCount || 0,
-        ingredients: validIngredients,
-        steps: validSteps,
-        searchTerms: generateSearchTerms(title, categories),
-        photoURL: recipe?.photoURL || null,
-        photoStoragePath: recipe?.photoStoragePath || null,
-        ingredientExtensions: recipe?.ingredientExtensions || {},
-        // Carry the import attribution through save. Hand-authored recipes
-        // won't have one — meal-mapper.ts strips `undefined` before write.
-        sourceUrl: recipe?.sourceUrl ?? null,
-      };
-
-      let recipeId: string;
-
-      if (isEditing) {
-        recipeId = recipe.id;
-
-        // If applying improvements, save current state as version and bump
-        if (improvements && improvements.length > 0) {
-          const newVersion = (recipe.version || 1) + 1;
-          await saveRecipeVersion(recipeId, recipe, "Before applying improvements");
-          recipeData.version = newVersion;
-          await updateRecipe(recipeId, recipeData);
-          await markImprovementsApplied(recipeId, newVersion);
-        } else {
-          await updateRecipe(recipeId, recipeData);
-        }
-      } else {
-        recipeId = await createRecipe(user.uid, recipeData);
-      }
-
-      // Save any new ingredients (not already in library) to nutrition_ingredients
-      const libraryIds = new Set(libraryItems.map((li) => li.id));
-      const newIngredients = validIngredients.filter(
-        (ing) => !libraryIds.has(ing.id)
-      );
-      await Promise.all(
-        newIngredients.map((ing) =>
-          saveIngredientToLibrary(user.uid, {
-            id: ing.id,
-            name: ing.name,
-            servingSize: ing.quantity ?? 1,
-            servingUnit: ing.unit || "unit",
-            calories: ing.calories ?? 0,
-            protein: ing.protein ?? 0,
-            carbs: ing.carbs ?? 0,
-            fat: ing.fat ?? 0,
-            fiber: ing.fiber,
-            netCarbs: ing.netCarbs,
-          })
-        )
-      );
-
-      if (imageFile) {
-        const { compressImage } = await import("@/lib/utils/image-compress");
-        const compressed = await compressImage(imageFile);
-        const { url, path } = await uploadRecipeImage(user.uid, recipeId, compressed);
-        await updateRecipe(recipeId, { photoURL: url, photoStoragePath: path });
-      }
-
-      toast.success(isEditing ? "Recipe updated!" : "Recipe created!");
+      const recipeId = await createRecipe(user.uid, recipeData);
+      await saveNewIngredients(recipeId, validIngredients);
+      await saveImageIfNeeded(recipeId);
+      toast.success("Recipe created!");
       router.push(`/recipes/${recipeId}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save recipe");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveNewIngredients(recipeId: string, validIngredients: typeof ingredients) {
+    const libraryIds = new Set(libraryItems.map((li) => li.id));
+    const newIngredients = validIngredients.filter((ing) => !libraryIds.has(ing.id));
+    await Promise.all(
+      newIngredients.map((ing) =>
+        saveIngredientToLibrary(user!.uid, {
+          id: ing.id,
+          name: ing.name,
+          servingSize: ing.quantity ?? 1,
+          servingUnit: ing.unit || "unit",
+          calories: ing.calories ?? 0,
+          protein: ing.protein ?? 0,
+          carbs: ing.carbs ?? 0,
+          fat: ing.fat ?? 0,
+          fiber: ing.fiber,
+          netCarbs: ing.netCarbs,
+        })
+      )
+    );
+  }
+
+  async function saveImageIfNeeded(recipeId: string) {
+    if (!imageFile) return;
+    const { compressImage } = await import("@/lib/utils/image-compress");
+    const compressed = await compressImage(imageFile);
+    const { url, path } = await uploadRecipeImage(user!.uid, recipeId, compressed);
+    await updateRecipe(recipeId, { photoURL: url, photoStoragePath: path });
+  }
+
+  async function handleVersionChoice(saveAsNew: boolean) {
+    if (!pendingRecipeData || !recipe || !user) return;
+    setShowVersionDialog(false);
+    setSaving(true);
+    try {
+      const recipeId = recipe.id;
+      const data = { ...pendingRecipeData };
+
+      if (saveAsNew) {
+        const newVersion = (recipe.version || 1) + 1;
+        await saveRecipeVersion(recipeId, recipe, "Saved as new version");
+        data.version = newVersion;
+        await updateRecipe(recipeId, data);
+        if (improvements && improvements.length > 0) {
+          await markImprovementsApplied(recipeId, newVersion);
+        }
+      } else {
+        await updateRecipe(recipeId, data);
+        if (improvements && improvements.length > 0) {
+          await markImprovementsApplied(recipeId, recipe.version || 1);
+        }
+      }
+
+      await saveNewIngredients(recipeId, (data.ingredients as typeof ingredients) ?? []);
+      await saveImageIfNeeded(recipeId);
+      toast.success("Recipe updated!");
+      router.push(`/recipes/${recipeId}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save recipe");
+    } finally {
+      setSaving(false);
+      setPendingRecipeData(null);
     }
   }
 
@@ -1147,133 +1350,38 @@ export function RecipeForm({
           )}
         </CardHeader>
         <CardContent className="space-y-3">
-          {ingredients.map((ing, index) => {
-            const review = reviewStatus[ing.id];
-            const isPending = review?.type === "pending";
-            const isMatched = review?.type === "matched";
-            const isNew = review?.type === "new";
-            const original = originalImports[ing.id];
-            // Only render the reference line when the current row has drifted
-            // from what the AI produced — otherwise it's visual noise.
-            const hasDrifted =
-              !!original &&
-              (original.quantity !== ing.quantity ||
-                original.unit !== ing.unit ||
-                original.name !== ing.name);
-            return (
-              <div
-                key={ing.id}
-                className={
-                  isPending
-                    ? "rounded-md border-l-4 border-amber-500 bg-amber-500/5 p-2"
-                    : isMatched || isNew
-                      ? "rounded-md border-l-4 border-emerald-500/60 bg-emerald-500/5 p-2"
-                      : ""
-                }
-              >
-                <div className="flex items-start gap-2">
-                  <GripVertical className="mt-2.5 h-4 w-4 shrink-0 text-muted-foreground/50 hidden sm:block" />
-                  <div className="grid flex-1 grid-cols-6 sm:grid-cols-12 gap-2">
-                    <Input
-                      className="col-span-2"
-                      placeholder="Qty"
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={ing.quantity ?? ""}
-                      onChange={(e) =>
-                        updateIngredient(
-                          index,
-                          "quantity",
-                          e.target.value ? parseFloat(e.target.value) : null
-                        )
-                      }
-                    />
-                    <UnitCombobox
-                      className="col-span-2"
-                      value={ing.unit}
-                      onValueChange={(v) => updateIngredient(index, "unit", v)}
-                    />
-                    <IngredientCombobox
-                      className="col-span-2 sm:col-span-5"
-                      value={ing.name}
-                      libraryItems={libraryItems}
-                      onSelectLibraryItem={(item) => selectLibraryIngredient(index, item)}
-                      onNameChange={(name) => updateIngredient(index, "name", name)}
-                    />
-                    <Input
-                      className="col-span-5 sm:col-span-3"
-                      placeholder="Note (optional)"
-                      value={ing.note}
-                      onChange={(e) => updateIngredient(index, "note", e.target.value)}
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="mt-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => removeIngredientAndCleanSteps(index)}
-                    disabled={ingredients.length === 1}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                {original && (isPending || isMatched) && hasDrifted && (
-                  <ImportReference
-                    original={original}
-                    current={{ quantity: ing.quantity, unit: ing.unit, name: ing.name }}
-                    onRestore={() => {
-                      updateIngredient(index, "quantity", original.quantity);
-                      updateIngredient(index, "unit", original.unit);
-                    }}
-                  />
-                )}
-
-                {isPending && (
-                  <ReviewPanel
-                    name={ing.name}
-                    library={libraryItems}
-                    onPickMatch={(item) => selectLibraryIngredient(index, item)}
-                    onKeepAsNew={() => confirmKeepAsNew(ing.id)}
-                  />
-                )}
-
-                {(isMatched || isNew) && (
-                  <div className="mt-2 ml-6 flex items-center gap-2 text-xs">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                    <span className="text-muted-foreground">
-                      {isMatched ? (
-                        <>
-                          Mapped to library ingredient{" "}
-                          <span className="font-medium text-foreground">
-                            {ing.name}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          Will be saved as a{" "}
-                          <span className="font-medium text-foreground">
-                            new library ingredient
-                          </span>
-                        </>
-                      )}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => reopenReview(ing.id)}
-                    >
-                      Change
-                    </Button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={reorderIngredients}
+          >
+            <SortableContext
+              items={ingredients.map((i) => i.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {ingredients.map((ing, index) => (
+                <SortableIngredientRow
+                  key={ing.id}
+                  ing={ing}
+                  index={index}
+                  isOnly={ingredients.length === 1}
+                  review={reviewStatus[ing.id]}
+                  original={originalImports[ing.id]}
+                  libraryItems={libraryItems}
+                  onUpdateIngredient={updateIngredient}
+                  onRemove={removeIngredientAndCleanSteps}
+                  onSelectLibraryItem={selectLibraryIngredient}
+                  onPickMatch={selectLibraryIngredient}
+                  onKeepAsNew={confirmKeepAsNew}
+                  onReopenReview={reopenReview}
+                  onRestore={(idx, orig) => {
+                    updateIngredient(idx, "quantity", orig.quantity);
+                    updateIngredient(idx, "unit", orig.unit);
+                  }}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
           <Button type="button" variant="outline" size="sm" onClick={addIngredient}>
             <Plus className="mr-2 h-4 w-4" />
             Add Ingredient
@@ -1400,6 +1508,43 @@ export function RecipeForm({
           Cancel
         </Button>
       </div>
+
+      <Dialog open={showVersionDialog} onOpenChange={setShowVersionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>How do you want to save?</DialogTitle>
+            <DialogDescription>
+              Choose whether to update the current version or save your changes as a new version.
+              Previous versions are always accessible from the recipe page.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <Button
+              onClick={() => handleVersionChoice(false)}
+              variant="outline"
+              disabled={saving}
+              className="h-auto py-3 flex flex-col items-start gap-0.5 text-left"
+            >
+              <span className="font-semibold">Update existing (v{recipe?.version || 1})</span>
+              <span className="text-xs font-normal text-muted-foreground">Overwrite the current version — use for small fixes or typos</span>
+            </Button>
+            <Button
+              onClick={() => handleVersionChoice(true)}
+              disabled={saving}
+              className="h-auto py-3 flex flex-col items-start gap-0.5 text-left"
+            >
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <span className="font-semibold">Save as new version (v{(recipe?.version || 1) + 1})</span>
+              <span className="text-xs font-normal text-primary-foreground/70">Keep the current version in history and create a new one</span>
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowVersionDialog(false)} disabled={saving}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

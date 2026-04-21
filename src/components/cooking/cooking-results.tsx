@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/contexts/auth-context";
-import { addCookLog, applyImprovement } from "@/lib/firebase/firestore";
+import { addCookLog } from "@/lib/firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import {
   Star,
   Loader2,
   Lightbulb,
-  ArrowUpCircle,
+  Pencil,
   PartyPopper,
   StickyNote,
 } from "lucide-react";
@@ -42,6 +43,7 @@ export function CookingResults({
   onClose,
 }: CookingResultsProps) {
   const { user } = useAuth();
+  const router = useRouter();
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [notes, setNotes] = useState(() =>
@@ -49,7 +51,6 @@ export function CookingResults({
   );
   const [improvements, setImprovements] = useState("");
   const [saving, setSaving] = useState(false);
-  const [applying, setApplying] = useState(false);
   const [saved, setSaved] = useState(false);
 
   async function handleSave() {
@@ -77,26 +78,6 @@ export function CookingResults({
       toast.error("Failed to save cook log");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleApplyImprovements() {
-    if (!improvements.trim()) return;
-
-    setApplying(true);
-    try {
-      await applyImprovement(
-        recipe.id,
-        recipe,
-        { notes: recipe.notes ? `${recipe.notes}\n\n--- Improvement (v${recipe.version || 1}) ---\n${improvements}` : improvements },
-        `Applied improvements from cooking session: ${improvements.slice(0, 100)}`
-      );
-      toast.success(`Recipe updated to v${(recipe.version || 1) + 1}!`);
-      onClose();
-    } catch {
-      toast.error("Failed to apply improvements");
-    } finally {
-      setApplying(false);
     }
   }
 
@@ -239,33 +220,31 @@ export function CookingResults({
             </div>
           </>
         ) : (
-          /* Post-save: option to apply improvements */
+          /* Post-save: option to update recipe */
           <div className="space-y-4">
             {improvements.trim() && (
               <Card className="border-primary/30">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <ArrowUpCircle className="h-4 w-4 text-primary" />
-                    Apply Improvements to Recipe?
+                    <Pencil className="h-4 w-4 text-primary" />
+                    Update Recipe?
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    This will save the current recipe as v{recipe.version || 1} and
-                    update it with your improvement notes as v{(recipe.version || 1) + 1}.
-                    You can always view previous versions from the recipe page.
+                    Open the recipe editor to apply your improvements. You can choose
+                    to update the existing version or save as a new one.
                   </p>
                   <div className="rounded-md bg-muted/50 p-3">
-                    <p className="text-sm">{improvements}</p>
+                    <p className="text-sm italic text-muted-foreground">Your notes:</p>
+                    <p className="text-sm mt-1">{improvements}</p>
                   </div>
                   <Button
-                    onClick={handleApplyImprovements}
-                    disabled={applying}
+                    onClick={() => router.push(`/recipes/${recipe.id}/edit?applyImprovements=true`)}
                     className="w-full"
                   >
-                    {applying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    <ArrowUpCircle className="mr-2 h-4 w-4" />
-                    Apply & Create v{(recipe.version || 1) + 1}
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Update Recipe Now
                   </Button>
                 </CardContent>
               </Card>

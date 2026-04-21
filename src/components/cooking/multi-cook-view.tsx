@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useCookingSession } from "@/lib/contexts/cooking-session-context";
 import { CookingStepDisplay } from "./cooking-step-display";
 import { TimerBar } from "./timer-bar";
 import { AddRecipeSheet } from "./add-recipe-sheet";
+import { VoiceControl } from "./voice-control";
+import { VoiceDictationOverlay } from "./voice-dictation-overlay";
+import { useVoiceControl } from "@/lib/voice/use-voice-control";
 import { ChevronLeft, Plus, X } from "lucide-react";
 
 export function MultiCookView() {
@@ -14,25 +17,23 @@ export function MultiCookView() {
   const { sessions, activeSessionId, setActiveSession, removeSession } =
     useCookingSession();
   const [showAddSheet, setShowAddSheet] = useState(false);
+  const voice = useVoiceControl();
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      router.replace("/");
+    }
+  }, [sessions.length, router]);
 
   if (sessions.length === 0) {
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background gap-4 p-6">
-        <p className="text-muted-foreground text-center">
-          No recipes currently cooking.
-        </p>
-        <Button onClick={() => router.push("/recipes")} className="rounded-xl">
-          Browse Recipes
-        </Button>
-      </div>
-    );
+    return null;
   }
 
   const activeSession =
     sessions.find((s) => s.recipeId === activeSessionId) || sessions[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-background">
       {/* Top bar with recipe tabs */}
       <div className="flex items-center justify-between px-4 py-3 md:px-6 border-b">
         <Button
@@ -83,15 +84,18 @@ export function MultiCookView() {
           </div>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="rounded-xl shrink-0"
-          onClick={() => setShowAddSheet(true)}
-        >
-          <Plus className="h-4 w-4 md:mr-1" />
-          <span className="hidden md:inline">Add recipe</span>
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <VoiceControl voice={voice} />
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-xl"
+            onClick={() => setShowAddSheet(true)}
+          >
+            <Plus className="h-4 w-4 md:mr-1" />
+            <span className="hidden md:inline">Add recipe</span>
+          </Button>
+        </div>
       </div>
 
       {/* Active session content */}
@@ -103,6 +107,14 @@ export function MultiCookView() {
       <TimerBar />
 
       {showAddSheet && <AddRecipeSheet onClose={() => setShowAddSheet(false)} />}
+
+      {voice.dictation && (
+        <VoiceDictationOverlay
+          dictation={voice.dictation}
+          onSave={voice.saveDictation}
+          onCancel={voice.cancelDictation}
+        />
+      )}
     </div>
   );
 }

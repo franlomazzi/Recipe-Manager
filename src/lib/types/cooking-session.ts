@@ -39,6 +39,7 @@ export interface CookingSessionContextValue {
   adjustTimer: (timerId: string, deltaSeconds: number) => void;
   removeTimer: (timerId: string) => void;
   setStepNote: (recipeId: string, stepIndex: number, note: string) => void;
+  appendStepNote: (recipeId: string, stepIndex: number, text: string) => void;
   isAnyCooking: boolean;
   persistentAlarm: boolean;
   setPersistentAlarm: (value: boolean) => void;

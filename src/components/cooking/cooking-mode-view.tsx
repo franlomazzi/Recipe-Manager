@@ -147,7 +147,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-50 flex flex-col bg-background"
+      className="fixed inset-0 z-[60] flex flex-col bg-background"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >

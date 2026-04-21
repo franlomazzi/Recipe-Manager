@@ -22,6 +22,7 @@ type Action =
   | { type: "SET_ACTIVE"; recipeId: string }
   | { type: "UPDATE_SESSION"; recipeId: string; updates: Partial<CookingSession> }
   | { type: "SET_STEP_NOTE"; recipeId: string; stepIndex: number; note: string }
+  | { type: "APPEND_STEP_NOTE"; recipeId: string; stepIndex: number; text: string }
   | { type: "START_TIMER"; timer: ActiveTimer }
   | { type: "PAUSE_TIMER"; timerId: string }
   | { type: "RESUME_TIMER"; timerId: string }
@@ -105,6 +106,23 @@ function reducer(state: State, action: Action): State {
             : s
         ),
       };
+    case "APPEND_STEP_NOTE": {
+      const text = action.text.trim();
+      if (!text) return state;
+      const now = new Date();
+      const hh = now.getHours().toString().padStart(2, "0");
+      const mm = now.getMinutes().toString().padStart(2, "0");
+      const line = `[${hh}:${mm}] ${text}`;
+      return {
+        ...state,
+        sessions: state.sessions.map((s) => {
+          if (s.recipeId !== action.recipeId) return s;
+          const existing = s.stepNotes[action.stepIndex] ?? "";
+          const next = existing ? `${existing}\n${line}` : line;
+          return { ...s, stepNotes: { ...s.stepNotes, [action.stepIndex]: next } };
+        }),
+      };
+    }
     case "START_TIMER":
       return { ...state, timers: [...state.timers, action.timer] };
     case "PAUSE_TIMER":
@@ -419,6 +437,13 @@ export function CookingSessionProvider({
     dispatch({ type: "SET_STEP_NOTE", recipeId, stepIndex, note });
   }, []);
 
+  const appendStepNote = useCallback(
+    (recipeId: string, stepIndex: number, text: string) => {
+      dispatch({ type: "APPEND_STEP_NOTE", recipeId, stepIndex, text });
+    },
+    []
+  );
+
   return (
     <CookingSessionContext.Provider
       value={{
@@ -430,6 +455,7 @@ export function CookingSessionProvider({
         setActiveSession,
         updateSession,
         setStepNote,
+        appendStepNote,
         startTimer,
         pauseTimer,
         resumeTimer,

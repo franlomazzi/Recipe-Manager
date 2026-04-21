@@ -21,6 +21,12 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -47,6 +53,7 @@ import {
   RotateCcw,
   Check,
   ChevronDown,
+  Eye,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -91,6 +98,8 @@ export default function RecipeDetailPage() {
 
   const { instance: activePlan } = useActivePlan();
   const [deletingVersion, setDeletingVersion] = useState<number | null>(null);
+  const [versionsExpanded, setVersionsExpanded] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState<RecipeVersion | null>(null);
 
   useEffect(() => {
     if (!recipeId) return;
@@ -774,8 +783,19 @@ export default function RecipeDetailPage() {
       {/* Version History */}
       {versions.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Version History</h2>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between text-left"
+            onClick={() => setVersionsExpanded((v) => !v)}
+          >
+            <h2 className="text-lg font-semibold">Version History</h2>
+            <ChevronDown
+              className={`h-5 w-5 text-muted-foreground transition-transform ${versionsExpanded ? "rotate-180" : ""}`}
+            />
+          </button>
 
+          {versionsExpanded && (
+            <>
           <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
             <Check className="h-4 w-4 text-primary" />
             <span className="text-sm font-medium">Current: v{recipe.version || 1}</span>
@@ -805,6 +825,15 @@ export default function RecipeDetailPage() {
                           ? v.createdAt.toDate().toLocaleDateString()
                           : ""}
                       </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setPreviewVersion(v)}
+                      >
+                        <Eye className="mr-1 h-3 w-3" />
+                        View
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -857,8 +886,75 @@ export default function RecipeDetailPage() {
               </Card>
             ))}
           </div>
+            </>
+          )}
         </div>
       )}
+
+      {/* Version preview sheet */}
+      <Sheet open={!!previewVersion} onOpenChange={(open) => { if (!open) setPreviewVersion(null); }}>
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+          {previewVersion && (
+            <>
+              <SheetHeader className="pb-4">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">v{previewVersion.version}</Badge>
+                  <SheetTitle className="text-base">{previewVersion.title}</SheetTitle>
+                </div>
+                {previewVersion.changeNote && (
+                  <p className="text-sm text-muted-foreground">{previewVersion.changeNote}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {previewVersion.createdAt?.toDate?.()
+                    ? previewVersion.createdAt.toDate().toLocaleDateString(undefined, { dateStyle: "long" })
+                    : ""}
+                  {" · "}
+                  {previewVersion.prepTime + previewVersion.cookTime} min · {previewVersion.servings} servings · {previewVersion.difficulty}
+                </p>
+              </SheetHeader>
+
+              {previewVersion.description && (
+                <p className="mb-4 text-sm text-muted-foreground">{previewVersion.description}</p>
+              )}
+
+              <div className="space-y-5">
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold">Ingredients ({previewVersion.ingredients.length})</h3>
+                  <ul className="space-y-1">
+                    {previewVersion.ingredients.map((ing, i) => (
+                      <li key={i} className="flex gap-2 text-sm">
+                        <span className="text-muted-foreground shrink-0">
+                          {ing.quantity != null ? ing.quantity : ""}{ing.unit ? ` ${ing.unit}` : ""}
+                        </span>
+                        <span>{ing.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold">Steps ({previewVersion.steps.length})</h3>
+                  <ol className="space-y-3">
+                    {previewVersion.steps.map((step, i) => (
+                      <li key={i} className="flex gap-3 text-sm">
+                        <span className="shrink-0 font-medium text-muted-foreground">{i + 1}.</span>
+                        <span>{step.instruction}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+
+                {previewVersion.notes && (
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Notes</h3>
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{previewVersion.notes}</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
 
       {/* Actions: Fork & Delete */}
       <div className="flex flex-wrap gap-3 pt-4">
