@@ -20,8 +20,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -48,6 +46,7 @@ import {
   Plus,
   RotateCcw,
   Check,
+  ChevronDown,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -58,7 +57,7 @@ import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { addRecipeToWeek, subscribeToShoppingListState } from "@/lib/firebase/shopping-list";
 import type { ExtraRecipeEntry } from "@/lib/types/shopping-list";
-import { addDays, format, parseISO } from "date-fns";
+import { addDays, format, formatDistanceToNow, parseISO } from "date-fns";
 import { ShoppingCart, ChevronLeft, ChevronRight } from "lucide-react";
 import type { CookLog, RecipeVersion } from "@/lib/types/recipe";
 import type { ShoppingListState } from "@/lib/types/shopping-list";
@@ -76,6 +75,7 @@ export default function RecipeDetailPage() {
   const isCurrentlyCooking = !!activeSession;
 
   const [deleting, setDeleting] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [servingMultiplier, setServingMultiplier] = useState(1);
   const [showCookDialog, setShowCookDialog] = useState(false);
   const [cookServings, setCookServings] = useState<number>(1);
@@ -265,8 +265,8 @@ export default function RecipeDetailPage() {
           disabled={recipe.ingredients.length === 0}
           title={recipe.ingredients.length === 0 ? "No ingredients to add" : "Add to shopping list"}
         >
-          <ShoppingCart className="mr-2 h-4 w-4" />
-          Add to shopping list
+          <ShoppingCart className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Add to shopping list</span>
         </Button>
         <ShareRecipeToggle
           recipeId={recipe.id}
@@ -275,14 +275,14 @@ export default function RecipeDetailPage() {
         />
         {isMine && (
           <Button variant="outline" size="sm" className="rounded-xl" render={<Link href={`/recipes/${recipe.id}/edit`} />}>
-            <Edit className="mr-2 h-4 w-4" />
-            Edit
+            <Edit className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Edit</span>
           </Button>
         )}
         {isCurrentlyCooking ? (
           <Button className="rounded-xl" render={<Link href="/cook" />}>
             <ChefHat className="mr-2 h-4 w-4" />
-            Back to cooking
+            <span className="hidden sm:inline">Back to </span>cooking
           </Button>
         ) : (
           <Button
@@ -372,6 +372,12 @@ export default function RecipeDetailPage() {
               <History className="mr-1 h-3 w-3" />
               v{recipe.version}
             </Badge>
+          )}
+          {cookLogs.length > 0 && cookLogs[0].cookedAt?.toDate?.() && (
+            <span className="flex items-center gap-1">
+              <History className="h-4 w-4" />
+              Last cooked {formatDistanceToNow(cookLogs[0].cookedAt.toDate(), { addSuffix: true })}
+            </span>
           )}
         </div>
         {recipe.categories.length > 0 && (
@@ -652,6 +658,25 @@ export default function RecipeDetailPage() {
                         )}
                       </div>
                     )}
+                    {step.ingredients.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {step.ingredients.map((si) => {
+                          const ing = recipe.ingredients.find((i) => i.id === si.ingredientId);
+                          if (!ing) return null;
+                          return (
+                            <Badge key={si.ingredientId} variant="secondary" className="text-xs font-normal">
+                              {si.quantity !== null
+                                ? `${scaleQuantity(si.quantity)} `
+                                : ing.quantity !== null
+                                ? `${scaleQuantity(ing.quantity)} `
+                                : ""}
+                              {ing.unit && `${ing.unit} `}
+                              {ing.name}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -674,67 +699,90 @@ export default function RecipeDetailPage() {
 
       <RecipeSourceLine url={recipe.sourceUrl ?? null} />
 
-      {/* Cook Logs & Version History */}
-      {(cookLogs.length > 0 || versions.length > 0) && (
-        <Tabs defaultValue="logs">
-          <TabsList>
-            <TabsTrigger value="logs">
-              Cook Log ({cookLogs.length})
-            </TabsTrigger>
-            <TabsTrigger value="versions">
-              <History className="mr-1.5 h-3.5 w-3.5" />
-              Versions ({versions.length})
-            </TabsTrigger>
-          </TabsList>
+      {/* Cook History */}
+      {cookLogs.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Cook History</h2>
+              <Badge variant="secondary" className="text-xs">
+                {cookLogs.length} {cookLogs.length === 1 ? "session" : "sessions"}
+              </Badge>
+            </div>
+            {cookLogs.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setHistoryExpanded((e) => !e)}
+                className="text-muted-foreground h-8 gap-1"
+              >
+                {historyExpanded ? "Show less" : `Show all ${cookLogs.length}`}
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform duration-200 ${
+                    historyExpanded ? "rotate-180" : ""
+                  }`}
+                />
+              </Button>
+            )}
+          </div>
 
-          <TabsContent value="logs" className="space-y-3 mt-3">
-            {cookLogs.map((log) => (
-              <Card key={log.id}>
+          <div className="space-y-3">
+            {(historyExpanded ? cookLogs : cookLogs.slice(0, 1)).map((log) => (
+              <Card key={log.id} className="card-elevated border-transparent">
                 <CardContent className="py-4">
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        {renderStars(log.rating)}
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-0.5">
+                          {renderStars(log.rating)}
+                        </div>
                         <span className="text-xs text-muted-foreground">
-                          {log.servingsCooked} servings
-                          {" \u00B7 v" + log.version}
+                          {log.servingsCooked} {log.servingsCooked === 1 ? "serving" : "servings"}
+                          {" · v"}{log.version}
                         </span>
                       </div>
                       {log.notes && (
                         <p className="text-sm">{log.notes}</p>
                       )}
                       {log.improvements && (
-                        <div className="mt-2 rounded-md bg-muted/50 p-2">
-                          <p className="text-xs font-medium text-muted-foreground mb-1">
-                            Improvements
-                          </p>
+                        <div className="rounded-md bg-muted/50 px-3 py-2">
+                          <p className="text-xs font-medium text-muted-foreground mb-0.5">Next time</p>
                           <p className="text-sm">{log.improvements}</p>
                         </div>
                       )}
                     </div>
-                    <span className="text-xs text-muted-foreground shrink-0 ml-4">
-                      {log.cookedAt?.toDate?.()
-                        ? log.cookedAt.toDate().toLocaleDateString()
-                        : ""}
-                    </span>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {log.cookedAt?.toDate?.()
+                          ? formatDistanceToNow(log.cookedAt.toDate(), { addSuffix: true })
+                          : ""}
+                      </p>
+                      {log.cookedAt?.toDate?.() && (
+                        <p className="text-[11px] text-muted-foreground/60 mt-0.5">
+                          {format(log.cookedAt.toDate(), "MMM d, yyyy")}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             ))}
-          </TabsContent>
+          </div>
+        </div>
+      )}
 
-          <TabsContent value="versions" className="space-y-3 mt-3">
-            {/* Current version indicator */}
-            <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
-              <Check className="h-4 w-4 text-primary" />
-              <span className="text-sm font-medium">
-                Current: v{recipe.version || 1}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                &mdash; {recipe.title}
-              </span>
-            </div>
+      {/* Version History */}
+      {versions.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">Version History</h2>
 
+          <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+            <Check className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">Current: v{recipe.version || 1}</span>
+            <span className="text-xs text-muted-foreground">&mdash; {recipe.title}</span>
+          </div>
+
+          <div className="space-y-3">
             {versions.map((v) => (
               <Card key={v.id}>
                 <CardContent className="py-4">
@@ -745,9 +793,7 @@ export default function RecipeDetailPage() {
                         <span className="text-sm font-medium">{v.title}</span>
                       </div>
                       {v.changeNote && (
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {v.changeNote}
-                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">{v.changeNote}</p>
                       )}
                       <p className="mt-1 text-xs text-muted-foreground">
                         {v.ingredients.length} ingredients &middot; {v.steps.length} steps
@@ -810,8 +856,8 @@ export default function RecipeDetailPage() {
                 </CardContent>
               </Card>
             ))}
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       )}
 
       {/* Actions: Fork & Delete */}

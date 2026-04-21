@@ -134,7 +134,7 @@ export function AppSidebar() {
 
       <div
         className={cn(
-          "flex h-16 items-center border-b border-sidebar-border",
+          "flex h-14 items-center border-b border-sidebar-border",
           collapsed ? "justify-center px-2" : "gap-2 px-6"
         )}
       >

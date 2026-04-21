@@ -50,13 +50,13 @@ export function ShareRecipeToggle({
       }
     >
       {busy ? (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />
       ) : shared ? (
-        <Users className="mr-2 h-4 w-4" />
+        <Users className="h-4 w-4 sm:mr-2" />
       ) : (
-        <Share2 className="mr-2 h-4 w-4" />
+        <Share2 className="h-4 w-4 sm:mr-2" />
       )}
-      {shared ? "Shared" : "Share"}
+      <span className="hidden sm:inline">{shared ? "Shared" : "Share"}</span>
     </Button>
   );
 }
