@@ -77,7 +77,7 @@ export function StepTimer({ minutes, label }: StepTimerProps) {
           />
         </svg>
         <span
-          className={`text-3xl font-mono font-bold ${
+          className={`text-3xl font-mono font-bold kt-cook-timer ${
             timer.isComplete ? "text-success" : ""
           }`}
         >

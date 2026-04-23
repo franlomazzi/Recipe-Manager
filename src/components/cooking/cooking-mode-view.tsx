@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useWakeLock } from "@/lib/hooks/use-wake-lock";
+import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { StepTimer } from "./step-timer";
 import { CookingResults } from "./cooking-results";
@@ -36,6 +37,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
   const [showResults, setShowResults] = useState(false);
   const [servingMultiplier, setServingMultiplier] = useState(1);
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
+  const isKT = useKitchenTool();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [servingsLocked, setServingsLocked] = useState(false);
@@ -147,7 +149,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[60] flex flex-col bg-background"
+      className={`fixed inset-0 z-[60] flex flex-col bg-background${isKT ? " kt-cook" : ""}`}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -222,10 +224,23 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-8 md:px-12 lg:px-16">
         {/* Step instruction */}
         <div className="max-w-2xl lg:max-w-3xl text-center">
-          <div className="mb-6 inline-flex h-14 w-14 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-primary text-2xl md:text-3xl font-bold text-primary-foreground shadow-lg">
-            {currentStep + 1}
-          </div>
-          <p className="text-2xl font-medium leading-relaxed md:text-3xl lg:text-4xl">
+          {isKT ? (
+            <div className="mb-4 kt-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+              Step
+              <span className="ml-2 text-foreground text-sm font-semibold">
+                {String(currentStep + 1).padStart(2, "0")}
+              </span>
+              <span className="mx-1.5 opacity-40">/</span>
+              <span className="text-sm">{String(steps.length).padStart(2, "0")}</span>
+            </div>
+          ) : (
+            <div className="mb-6 inline-flex h-14 w-14 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-primary text-2xl md:text-3xl font-bold text-primary-foreground shadow-lg">
+              {currentStep + 1}
+            </div>
+          )}
+          <p className={isKT
+            ? "kt-serif text-3xl font-medium leading-[1.15] md:text-5xl lg:text-6xl tracking-tight"
+            : "text-2xl font-medium leading-relaxed md:text-3xl lg:text-4xl"}>
             {step.instruction}
           </p>
         </div>

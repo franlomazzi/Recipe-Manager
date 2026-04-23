@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useRecipe } from "@/lib/hooks/use-recipe";
+import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useHousehold } from "@/lib/contexts/household-context";
 import { ShareRecipeToggle } from "@/components/recipe/share-recipe-toggle";
@@ -74,6 +75,7 @@ export default function RecipeDetailPage() {
   const router = useRouter();
   const recipeId = params.recipeId as string;
   const { recipe, loading } = useRecipe(recipeId);
+  const isKT = useKitchenTool();
   const { user } = useAuth();
   const { partnerUid, partnerName } = useHousehold();
   const isMine = !!user && recipe?.userId === user.uid;
@@ -252,7 +254,7 @@ export default function RecipeDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-4 md:p-6 lg:p-4 2xl:p-8 2xl:max-w-6xl space-y-6 lg:space-y-4 2xl:space-y-6">
+    <div className={`mx-auto max-w-4xl p-4 md:p-6 lg:p-4 2xl:p-8 2xl:max-w-6xl space-y-6 lg:space-y-4 2xl:space-y-6${isKT ? " kt-recipe-detail" : ""}`}>
       {/* Header */}
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" className="rounded-xl" render={<Link href="/recipes" />}>

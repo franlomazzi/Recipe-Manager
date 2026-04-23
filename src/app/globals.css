@@ -310,6 +310,86 @@
   border-color: var(--kt-rule);
 }
 
+/* Kitchen Tool — Recipe detail "cookbook page" treatment.
+   Scoped to .kt-recipe-detail so it only applies inside the detail page
+   when the user is on the kitchen-tool theme. */
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail h1 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail h2 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail .font-semibold {
+  /* Scale quantities in ingredients with tabular numerals */
+  font-variant-numeric: tabular-nums;
+}
+/* Step "cards" become hairline-separated rows. */
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail .card-elevated {
+  border: 1px solid var(--kt-rule) !important;
+  background: var(--card) !important;
+}
+
+/* Kitchen Tool — Cooking mode "full-bleed / timer-as-hero" treatment */
+.kt-cook {
+  /* Kitchen mode is dark as a deliberate state change — signals focus. */
+  background: #15120E !important;
+  color: #F6F2EB;
+}
+.kt-cook * { border-color: #2F2A22; }
+.kt-cook .bg-muted { background: #23201A; }
+.kt-cook .bg-primary { background: #E0663A; }
+.kt-cook .text-primary { color: #E0663A; }
+.kt-cook .text-muted-foreground { color: #A89F90; }
+.kt-cook .bg-card { background: #1E1A14; }
+.kt-cook .bg-background { background: #15120E; }
+
+/* Make the step-timer numerals huge inside cook mode */
+.kt-cook .kt-cook-timer {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: clamp(3.5rem, 10vw, 7rem);
+  line-height: 1;
+}
+/* Enlarge the timer's circular progress ring too */
+.kt-cook .h-36.w-36 {
+  height: 14rem;
+  width: 14rem;
+}
+@media (min-width: 768px) {
+  .kt-cook .h-36.w-36 {
+    height: 18rem;
+    width: 18rem;
+  }
+}
+
+/* Kitchen Tool — page headings default to editorial serif.
+   Opt-out: add .kt-no-serif to any heading to keep sans. */
+:is(.kitchen-tool, .kitchen-tool-dark) h1:not(.kt-no-serif),
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-page-title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Kitchen Tool — badges: squarer, tighter */
+:is(.kitchen-tool, .kitchen-tool-dark) [data-slot="badge"] {
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kitchen Tool — mono treatment for common quantity-ish spots */
+:is(.kitchen-tool, .kitchen-tool-dark) .font-mono {
+  font-family: var(--font-mono);
+}
+
 /* Kitchen Tool — subdue hover scale on content (motion-sickness avoidance) */
 :is(.kitchen-tool, .kitchen-tool-dark) .hover\:scale-\[1\.02\]:hover,
 :is(.kitchen-tool, .kitchen-tool-dark) .hover\:scale-105:hover {
