@@ -14,6 +14,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       defaultTheme="system"
       enableSystem
       disableTransitionOnChange
+      themes={["light", "dark", "system", "kitchen-tool", "kitchen-tool-dark"]}
     >
       <ActiveAccountProvider>
         <AuthProvider>

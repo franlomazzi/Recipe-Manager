@@ -6,12 +6,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sun, Moon, Monitor } from "lucide-react";
+import { Sun, Moon, Monitor, ChefHat } from "lucide-react";
 
 export function ThemeToggle() {
-  const { setTheme, theme } = useTheme();
+  const { setTheme } = useTheme();
 
   return (
     <DropdownMenu>
@@ -32,6 +33,15 @@ export function ThemeToggle() {
         <DropdownMenuItem onClick={() => setTheme("system")}>
           <Monitor className="mr-2 h-4 w-4" />
           System
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setTheme("kitchen-tool")}>
+          <ChefHat className="mr-2 h-4 w-4" />
+          Kitchen Tool
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("kitchen-tool-dark")}>
+          <ChefHat className="mr-2 h-4 w-4" />
+          Kitchen Tool · Dark
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
