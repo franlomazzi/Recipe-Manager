@@ -8,8 +8,9 @@ import {
   updateRecipe,
   saveRecipeVersion,
   markImprovementsApplied,
+  deleteRecipe,
 } from "@/lib/firebase/firestore";
-import { uploadRecipeImage } from "@/lib/firebase/storage";
+import { uploadRecipeImage, deleteRecipeImage } from "@/lib/firebase/storage";
 import { generateSearchTerms } from "@/lib/utils/ingredient-parser";
 import { detectTimer } from "@/lib/utils/timer-detector";
 import { guessIngredientCategory } from "@/lib/utils/category-mapper";
@@ -99,6 +100,44 @@ type IngredientReview =
   | { type: "pending" }
   | { type: "matched"; libraryId: string }
   | { type: "new" };
+
+/**
+ * Scale library reference macros to the recipe's actual quantity. Returns
+ * the macro fields to spread onto an Ingredient. When quantity is null/0,
+ * macros are zeroed (a linked row with no amount yet contributes nothing).
+ *
+ * This is the write-time scaling that fixes the stale-calories bug: the
+ * food tracker reads `calories`/`protein`/... from the Firestore doc
+ * directly, so those values must already be correct for the recipe's qty.
+ */
+function scaleFromReference(
+  reference: {
+    amount: number;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    fiber?: number;
+    netCarbs?: number;
+  },
+  quantity: number | null
+): Pick<Ingredient, "calories" | "protein" | "carbs" | "fat" | "fiber" | "netCarbs"> {
+  const qty = quantity ?? 0;
+  const ref = reference.amount || 100;
+  const factor = qty / ref;
+  return {
+    calories: Math.round(reference.calories * factor),
+    protein: Number((reference.protein * factor).toFixed(1)),
+    carbs: Number((reference.carbs * factor).toFixed(1)),
+    fat: Number((reference.fat * factor).toFixed(1)),
+    ...(reference.fiber !== undefined && {
+      fiber: Number((reference.fiber * factor).toFixed(1)),
+    }),
+    ...(reference.netCarbs !== undefined && {
+      netCarbs: Number((reference.netCarbs * factor).toFixed(1)),
+    }),
+  };
+}
 
 function createEmptyIngredient(): Ingredient {
   return {
@@ -206,6 +245,7 @@ function SortableIngredientRow({
             className="col-span-2"
             value={ing.unit}
             onValueChange={(v) => onUpdateIngredient(index, "unit", v)}
+            lockedUnit={ing.reference?.unit}
           />
           <IngredientCombobox
             className="col-span-2 sm:col-span-5"
@@ -596,6 +636,8 @@ export function RecipeForm({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(recipe?.photoURL || null);
   const [saving, setSaving] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showVersionDialog, setShowVersionDialog] = useState(false);
   const [pendingRecipeData, setPendingRecipeData] = useState<Partial<Omit<Recipe, "id" | "userId" | "createdAt">> | null>(null);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
@@ -651,10 +693,39 @@ export function RecipeForm({
   function updateIngredient(index: number, field: keyof Ingredient, value: string | number | null) {
     setIngredients((prev) => {
       const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: value };
+      const current = updated[index];
+      const next: Ingredient = { ...current, [field]: value };
+
       if (field === "name" && typeof value === "string") {
-        updated[index].category = guessIngredientCategory(value);
+        next.category = guessIngredientCategory(value);
+        // Editing the name on a linked row means the user is deviating from
+        // the library ingredient. Drop the reference + library id so the
+        // unit unlocks and macros stop being authoritative. A re-link via
+        // the combobox restores them.
+        if (current.reference && value.trim() !== current.name.trim()) {
+          delete next.reference;
+          next.id = crypto.randomUUID();
+          next.calories = undefined;
+          next.protein = undefined;
+          next.carbs = undefined;
+          next.fat = undefined;
+          next.fiber = undefined;
+          next.netCarbs = undefined;
+        }
       }
+
+      // Re-scale macros whenever quantity changes on a linked row. Write-time
+      // scaling keeps the Firestore doc's `calories` etc. correct for
+      // whatever the user typed — the food tracker reads those directly.
+      if (field === "quantity" && next.reference) {
+        const scaled = scaleFromReference(
+          next.reference,
+          typeof value === "number" ? value : null
+        );
+        Object.assign(next, scaled);
+      }
+
+      updated[index] = next;
       return updated;
     });
   }
@@ -663,27 +734,30 @@ export function RecipeForm({
     const oldId = ingredients[index]?.id;
     setIngredients((prev) => {
       const updated = [...prev];
-      // Preserve the row's existing unit and quantity when mapping. When a
-      // recipe is imported, the quantity and unit reflect the recipe's intent
-      // ("1 tsp salt") and must survive the mapping — silently adopting the
-      // library's default unit ("tbsp") would misrepresent the recipe. Only
-      // fall back to the library's servingUnit when the row has no unit yet
-      // (manual-entry path where the user is picking from scratch).
-      const amount = updated[index].quantity ?? 0;
-      const ref = item.servingSize || 100;
-      const factor = amount / ref;
+      // Adopt the library's reference unit on link. Scaling is only coherent
+      // when the recipe's amount and the library's reference share a unit
+      // (we don't carry density data, so ml↔g can't be converted). The UI
+      // locks the unit dropdown while linked; to override, unlink by
+      // renaming the ingredient.
+      const reference = {
+        amount: item.servingSize || 100,
+        unit: item.servingUnit || "g",
+        calories: item.calories,
+        protein: item.protein,
+        carbs: item.carbs,
+        fat: item.fat,
+        ...(item.fiber !== undefined && { fiber: item.fiber }),
+        ...(item.netCarbs !== undefined && { netCarbs: item.netCarbs }),
+      };
+      const scaled = scaleFromReference(reference, updated[index].quantity);
 
       updated[index] = {
         ...updated[index],
         id: item.id,
         name: item.name,
-        unit: updated[index].unit || item.servingUnit || "",
-        calories: Math.round(item.calories * factor),
-        protein: Number((item.protein * factor).toFixed(1)),
-        carbs: Number((item.carbs * factor).toFixed(1)),
-        fat: Number((item.fat * factor).toFixed(1)),
-        ...(item.fiber !== undefined && { fiber: Number((item.fiber * factor).toFixed(1)) }),
-        ...(item.netCarbs !== undefined && { netCarbs: Number((item.netCarbs * factor).toFixed(1)) }),
+        unit: reference.unit,
+        reference,
+        ...scaled,
         category: guessIngredientCategory(item.name),
       };
       return updated;
@@ -1076,6 +1150,22 @@ export function RecipeForm({
     const compressed = await compressImage(imageFile);
     const { url, path } = await uploadRecipeImage(user!.uid, recipeId, compressed);
     await updateRecipe(recipeId, { photoURL: url, photoStoragePath: path });
+  }
+
+  async function handleDelete() {
+    if (!recipe) return;
+    setDeleting(true);
+    try {
+      if (recipe.photoStoragePath) {
+        await deleteRecipeImage(recipe.photoStoragePath);
+      }
+      await deleteRecipe(recipe.id);
+      toast.success("Recipe deleted");
+      router.replace("/recipes");
+    } catch {
+      toast.error("Failed to delete recipe");
+      setDeleting(false);
+    }
   }
 
   async function handleVersionChoice(saveAsNew: boolean) {
@@ -1512,6 +1602,45 @@ export function RecipeForm({
           Cancel
         </Button>
       </div>
+
+      {isEditing && (
+        <div className="flex justify-start border-t border-border pt-6">
+          <Button
+            type="button"
+            variant="outline"
+            className="text-destructive hover:text-destructive"
+            onClick={() => setShowDeleteDialog(true)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete Recipe
+          </Button>
+        </div>
+      )}
+
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Recipe</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete &ldquo;{recipe?.title}&rdquo;? This action
+              cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setShowDeleteDialog(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showVersionDialog} onOpenChange={setShowVersionDialog}>
         <DialogContent>

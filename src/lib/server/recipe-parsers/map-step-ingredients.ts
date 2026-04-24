@@ -6,9 +6,9 @@
 // The caller is expected to be the recipe form; we do not modify the recipe —
 // we just produce the mapping, which the client applies to its local state.
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3-flash-preview";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-const TIMEOUT_MS = 45_000;
+const TIMEOUT_MS = 90_000;
 
 export class StepMapperError extends Error {
   status: number;
@@ -129,6 +129,7 @@ export async function mapIngredientsToSteps(input: {
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.1,
+      thinkingConfig: { thinkingBudget: 0 },
     },
   };
 

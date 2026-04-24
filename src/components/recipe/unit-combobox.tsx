@@ -16,12 +16,20 @@ interface UnitComboboxProps {
   value: string;
   onValueChange: (unit: string) => void;
   className?: string;
+  /**
+   * When set, the combobox renders as a read-only pill showing only this
+   * unit. Used for ingredients linked to a library entry — scaling macros
+   * only makes sense against the library's reference unit, so the choice
+   * is taken away on purpose.
+   */
+  lockedUnit?: string;
 }
 
 export function UnitCombobox({
   value,
   onValueChange,
   className,
+  lockedUnit,
 }: UnitComboboxProps) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -142,6 +150,18 @@ export function UnitCombobox({
       window.removeEventListener("resize", updatePosition);
     };
   }, [open, updatePosition]);
+
+  if (lockedUnit) {
+    const lockedLabel = UNIT_LABELS[lockedUnit] ?? lockedUnit;
+    return (
+      <div
+        className={`flex h-8 w-full items-center rounded-lg border border-input bg-muted/40 px-2.5 text-sm text-muted-foreground select-none ${className ?? ""}`}
+        title={`Locked to the library ingredient's reference unit (${lockedUnit}). Unlink by renaming the ingredient.`}
+      >
+        <span className="truncate">{lockedLabel}</span>
+      </div>
+    );
+  }
 
   return (
     <div className={className ?? ""}>

@@ -2,6 +2,7 @@ import type {
   Recipe,
   Ingredient,
   IngredientExtension,
+  IngredientReference,
   FirestoreMealIngredient,
   Step,
 } from "@/lib/types/recipe";
@@ -22,6 +23,23 @@ export function firestoreDocToRecipe(
 
   const ingredients: Ingredient[] = rawIngredients.map((mi) => {
     const ext = extensions[mi.foodId];
+    const reference: IngredientReference | undefined =
+      mi.referenceAmount !== undefined && mi.referenceUnit !== undefined
+        ? {
+            amount: mi.referenceAmount,
+            unit: mi.referenceUnit,
+            calories: mi.referenceCalories ?? 0,
+            protein: mi.referenceProtein ?? 0,
+            carbs: mi.referenceCarbs ?? 0,
+            fat: mi.referenceFat ?? 0,
+            ...(mi.referenceFiber !== undefined && {
+              fiber: mi.referenceFiber,
+            }),
+            ...(mi.referenceNetCarbs !== undefined && {
+              netCarbs: mi.referenceNetCarbs,
+            }),
+          }
+        : undefined;
     return {
       id: mi.foodId,
       quantity: mi.amount ?? null,
@@ -37,6 +55,7 @@ export function firestoreDocToRecipe(
       fiber: mi.fiber,
       netCarbs: mi.netCarbs,
       isAiGenerated: mi.isAiGenerated,
+      ...(reference && { reference }),
     };
   });
 
@@ -87,7 +106,9 @@ export function firestoreDocToRecipe(
 export function recipeToFirestoreDoc(
   recipe: Omit<Recipe, "id" | "userId" | "createdAt" | "updatedAt">
 ): Record<string, unknown> {
-  // Convert Ingredient[] back to MealIngredient format
+  // Convert Ingredient[] back to MealIngredient format. When linked to a
+  // library ingredient, we persist the reference serving alongside the scaled
+  // macros so the food tracker can re-scale on edit.
   const firestoreIngredients: FirestoreMealIngredient[] =
     recipe.ingredients.map((ing) => ({
       foodId: ing.id,
@@ -102,6 +123,20 @@ export function recipeToFirestoreDoc(
       ...(ing.netCarbs !== undefined && { netCarbs: ing.netCarbs }),
       ...(ing.isAiGenerated !== undefined && {
         isAiGenerated: ing.isAiGenerated,
+      }),
+      ...(ing.reference && {
+        referenceAmount: ing.reference.amount,
+        referenceUnit: ing.reference.unit,
+        referenceCalories: ing.reference.calories,
+        referenceProtein: ing.reference.protein,
+        referenceCarbs: ing.reference.carbs,
+        referenceFat: ing.reference.fat,
+        ...(ing.reference.fiber !== undefined && {
+          referenceFiber: ing.reference.fiber,
+        }),
+        ...(ing.reference.netCarbs !== undefined && {
+          referenceNetCarbs: ing.reference.netCarbs,
+        }),
       }),
     }));
 

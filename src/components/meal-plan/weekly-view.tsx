@@ -8,7 +8,6 @@ import {
   getIndicesForDate,
 } from "@/lib/firebase/meal-plans";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,7 +35,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { addDays, format, parseISO, isToday } from "date-fns";
+import {
+  addDays,
+  format,
+  parseISO,
+  isToday,
+  startOfWeek,
+  differenceInCalendarDays,
+} from "date-fns";
 import type { PlanInstance, PlanMeal, PlanDay } from "@/lib/types/meal-plan";
 import { MEAL_CATEGORIES, DAYS_OF_WEEK } from "@/lib/types/meal-plan";
 
@@ -62,33 +68,45 @@ export function WeeklyView({
 }: WeeklyViewProps) {
   const router = useRouter();
   const { recipes } = useRecipes();
+
+  const planStart = parseISO(instance.startDate);
+  const planEnd = addDays(planStart, instance.snapshot.length * 7 - 1);
+  const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
+  const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
+  const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+
   const [weekOffset, setWeekOffset] = useState(() => {
-    const indices = getIndicesForDate(instance, new Date());
-    return indices?.weekIndex ?? 0;
+    const todayMonday = startOfWeek(new Date(), { weekStartsOn: 1 });
+    const offset = differenceInCalendarDays(todayMonday, firstMonday) / 7;
+    return Math.max(0, Math.min(totalWeeks - 1, offset));
   });
 
-  // Mobile: selected day index
-  const todayIndices = getIndicesForDate(instance, new Date());
-  const [selectedDay, setSelectedDay] = useState(
-    todayIndices?.weekIndex === weekOffset ? (todayIndices?.dayIndex ?? 0) : 0
-  );
+  // Mobile: selected day index (column within the Mon-Sun row)
+  const [selectedDay, setSelectedDay] = useState(() => {
+    for (let i = 0; i < 7; i++) {
+      if (isToday(addDays(firstMonday, weekOffset * 7 + i))) return i;
+    }
+    for (let i = 0; i < 7; i++) {
+      if (getIndicesForDate(instance, addDays(firstMonday, weekOffset * 7 + i))) {
+        return i;
+      }
+    }
+    return 0;
+  });
 
-  // Meal picker state
+  // Meal picker state — colIdx is the 0..6 column in the displayed Mon-Sun week
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<{
-    dayIndex: number;
+    colIdx: number;
     category: string;
   } | null>(null);
 
   // Meal action sheet state
   const [actionOpen, setActionOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<{
-    dayIndex: number;
+    colIdx: number;
     category: string;
   } | null>(null);
-
-  const currentWeek = instance.snapshot[weekOffset];
-  const planStart = parseISO(instance.startDate);
 
   // Preload all meal photos across the entire plan so navigating between weeks
   // and returning to this page uses the browser cache instead of re-fetching.
@@ -110,10 +128,14 @@ export function WeeklyView({
   const weekDates = useMemo(
     () =>
       Array.from({ length: 7 }, (_, i) =>
-        addDays(planStart, weekOffset * 7 + i)
+        addDays(firstMonday, weekOffset * 7 + i)
       ),
-    [planStart, weekOffset]
+    [firstMonday, weekOffset]
   );
+
+  function indicesForColumn(colIdx: number) {
+    return getIndicesForDate(instance, weekDates[colIdx]);
+  }
 
   const cookableIds = useMemo(
     () => new Set(recipes.filter((r) => r.steps.length > 0).map((r) => r.id)),
@@ -129,39 +151,49 @@ export function WeeklyView({
   const [cookTarget, setCookTarget] = useState<{ mealId: string; defaultServings: number } | null>(null);
   const [cookServings, setCookServings] = useState(1);
 
-  function getMeal(dayIndex: number, category: string): PlanMeal | undefined {
-    return currentWeek?.days[dayIndex]?.meals.find(
+  function getMeal(colIdx: number, category: string): PlanMeal | undefined {
+    const indices = indicesForColumn(colIdx);
+    if (!indices) return undefined;
+    return instance.snapshot[indices.weekIndex]?.days[indices.dayIndex]?.meals.find(
       (m) => m.category === category
     );
   }
 
-  function openPicker(dayIndex: number, category: string) {
-    setPickerTarget({ dayIndex, category });
+  function openPicker(colIdx: number, category: string) {
+    if (!indicesForColumn(colIdx)) return;
+    setPickerTarget({ colIdx, category });
     setPickerOpen(true);
   }
 
-  function openAction(dayIndex: number, category: string) {
-    setActionTarget({ dayIndex, category });
+  function openAction(colIdx: number, category: string) {
+    if (!indicesForColumn(colIdx)) return;
+    setActionTarget({ colIdx, category });
     setActionOpen(true);
   }
 
   async function handleMealSelect(meal: PlanMeal) {
-    if (!pickerTarget || !currentWeek) return;
-    const { dayIndex, category } = pickerTarget;
-    const day = currentWeek.days[dayIndex];
+    if (!pickerTarget) return;
+    const indices = indicesForColumn(pickerTarget.colIdx);
+    if (!indices) return;
+    const { weekIndex, dayIndex } = indices;
+    const day = instance.snapshot[weekIndex]?.days[dayIndex];
+    if (!day) return;
     const updatedDay: PlanDay = {
-      meals: [...day.meals.filter((m) => m.category !== category), meal],
+      meals: [...day.meals.filter((m) => m.category !== pickerTarget.category), meal],
     };
-    await updateInstanceDay(instance.id, weekOffset, dayIndex, updatedDay);
+    await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
   }
 
-  async function removeMeal(dayIndex: number, category: string) {
-    if (!currentWeek) return;
-    const day = currentWeek.days[dayIndex];
+  async function removeMeal(colIdx: number, category: string) {
+    const indices = indicesForColumn(colIdx);
+    if (!indices) return;
+    const { weekIndex, dayIndex } = indices;
+    const day = instance.snapshot[weekIndex]?.days[dayIndex];
+    if (!day) return;
     const updatedDay: PlanDay = {
       meals: day.meals.filter((m) => m.category !== category),
     };
-    await updateInstanceDay(instance.id, weekOffset, dayIndex, updatedDay);
+    await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
   }
 
   function launchCook(mealId: string) {
@@ -170,18 +202,8 @@ export function WeeklyView({
     setCookTarget({ mealId, defaultServings });
   }
 
-  if (!currentWeek) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center text-muted-foreground">
-          No data for this week
-        </CardContent>
-      </Card>
-    );
-  }
-
   const currentMealId = pickerTarget
-    ? getMeal(pickerTarget.dayIndex, pickerTarget.category)?.mealId
+    ? getMeal(pickerTarget.colIdx, pickerTarget.category)?.mealId
     : undefined;
 
   return (
@@ -210,13 +232,13 @@ export function WeeklyView({
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
             <span className="text-xs font-medium min-w-[56px] text-center text-muted-foreground">
-              {weekOffset + 1}/{instance.snapshot.length}
+              {weekOffset + 1}/{totalWeeks}
             </span>
             <Button
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              disabled={weekOffset >= instance.snapshot.length - 1}
+              disabled={weekOffset >= totalWeeks - 1}
               onClick={() => {
                 setWeekOffset((i) => i + 1);
                 setSelectedDay(0);
@@ -260,33 +282,43 @@ export function WeeklyView({
         <div className="md:hidden flex flex-col flex-1 min-h-0 space-y-2">
           {/* Day pills */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 shrink-0">
-            {DAYS_OF_WEEK.map((day, idx) => {
+            {DAYS_OF_WEEK.map((_, idx) => {
               const date = weekDates[idx];
               const today = isToday(date);
-              const hasMeals = (currentWeek.days[idx]?.meals.length ?? 0) > 0;
+              const indices = indicesForColumn(idx);
+              const inRange = indices !== null;
+              const hasMeals =
+                inRange &&
+                (instance.snapshot[indices!.weekIndex]?.days[indices!.dayIndex]
+                  ?.meals.length ?? 0) > 0;
               return (
                 <button
-                  key={day}
+                  key={idx}
                   type="button"
+                  disabled={!inRange}
                   className={`flex flex-col items-center rounded-xl px-3 py-2 transition-colors shrink-0 min-w-[50px] ${
-                    selectedDay === idx
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : today
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted/50 text-foreground"
+                    !inRange
+                      ? "bg-muted/30 text-muted-foreground/50 cursor-not-allowed"
+                      : selectedDay === idx
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : today
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted/50 text-foreground"
                   }`}
-                  onClick={() => setSelectedDay(idx)}
+                  onClick={() => inRange && setSelectedDay(idx)}
                 >
                   <span className="text-[11px] font-medium">
-                    {day.slice(0, 3)}
+                    {format(date, "EEE")}
                   </span>
                   <span
                     className={`text-lg font-bold leading-tight ${
-                      selectedDay === idx
-                        ? "text-primary-foreground"
-                        : today
-                          ? "text-primary"
-                          : ""
+                      !inRange
+                        ? ""
+                        : selectedDay === idx
+                          ? "text-primary-foreground"
+                          : today
+                            ? "text-primary"
+                            : ""
                     }`}
                   >
                     {format(date, "d")}
@@ -301,21 +333,27 @@ export function WeeklyView({
 
           {/* Meal cards */}
           <div className="flex-1 overflow-y-auto space-y-2">
-            {MEAL_CATEGORIES.map((category) => {
-              const meal = getMeal(selectedDay, category);
-              const cookable = meal ? cookableIds.has(meal.mealId) : false;
-              return (
-                <MobileMealCard
-                  key={category}
-                  category={category}
-                  meal={meal}
-                  cookable={cookable}
-                  onTap={() => openPicker(selectedDay, category)}
-                  onMealTap={() => openAction(selectedDay, category)}
-                  onCook={() => meal && launchCook(meal.mealId)}
-                />
-              );
-            })}
+            {indicesForColumn(selectedDay) === null ? (
+              <div className="rounded-xl border border-dashed border-border/50 bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                This day is outside the plan range.
+              </div>
+            ) : (
+              MEAL_CATEGORIES.map((category) => {
+                const meal = getMeal(selectedDay, category);
+                const cookable = meal ? cookableIds.has(meal.mealId) : false;
+                return (
+                  <MobileMealCard
+                    key={category}
+                    category={category}
+                    meal={meal}
+                    cookable={cookable}
+                    onTap={() => openPicker(selectedDay, category)}
+                    onMealTap={() => openAction(selectedDay, category)}
+                    onCook={() => meal && launchCook(meal.mealId)}
+                  />
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -324,18 +362,31 @@ export function WeeklyView({
           {/* Day header row */}
           <div className="grid gap-1 lg:gap-1.5 shrink-0" style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
             <div />
-            {DAYS_OF_WEEK.map((day, idx) => {
+            {DAYS_OF_WEEK.map((_, idx) => {
               const date = weekDates[idx];
               const today = isToday(date);
+              const inRange = indicesForColumn(idx) !== null;
               return (
                 <div
-                  key={day}
+                  key={idx}
                   className={`text-center py-1 rounded-lg ${
-                    today ? "bg-primary text-primary-foreground" : "bg-muted/60"
+                    !inRange
+                      ? "bg-muted/30 text-muted-foreground/50"
+                      : today
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted/60"
                   }`}
                 >
-                  <span className={`text-[11px] font-medium ${today ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                    {day.slice(0, 3)}
+                  <span
+                    className={`text-[11px] font-medium ${
+                      !inRange
+                        ? ""
+                        : today
+                          ? "text-primary-foreground/80"
+                          : "text-muted-foreground"
+                    }`}
+                  >
+                    {format(date, "EEE")}
                   </span>{" "}
                   <span className="text-sm font-bold">{format(date, "d")}</span>
                 </div>
@@ -362,11 +413,13 @@ export function WeeklyView({
               {DAYS_OF_WEEK.map((_, dayIdx) => {
                 const meal = getMeal(dayIdx, category);
                 const cookable = meal ? cookableIds.has(meal.mealId) : false;
+                const inRange = indicesForColumn(dayIdx) !== null;
                 return (
                   <GridCell
                     key={dayIdx}
                     meal={meal}
                     cookable={cookable}
+                    inRange={inRange}
                     onTap={() => openPicker(dayIdx, category)}
                     onMealTap={() => openAction(dayIdx, category)}
                     onCook={() => meal && launchCook(meal.mealId)}
@@ -384,13 +437,13 @@ export function WeeklyView({
           <DialogHeader>
             <DialogTitle className="truncate">
               {actionTarget
-                ? (getMeal(actionTarget.dayIndex, actionTarget.category)?.mealName ?? "Meal options")
+                ? (getMeal(actionTarget.colIdx, actionTarget.category)?.mealName ?? "Meal options")
                 : "Meal options"}
             </DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-2 pt-1">
             {actionTarget && (() => {
-              const meal = getMeal(actionTarget.dayIndex, actionTarget.category);
+              const meal = getMeal(actionTarget.colIdx, actionTarget.category);
               return meal ? (
                 <Button
                   className="w-full justify-start gap-3 h-12"
@@ -409,7 +462,7 @@ export function WeeklyView({
               className="w-full justify-start gap-3 h-12"
               onClick={() => {
                 const meal = actionTarget
-                  ? getMeal(actionTarget.dayIndex, actionTarget.category)
+                  ? getMeal(actionTarget.colIdx, actionTarget.category)
                   : undefined;
                 setActionOpen(false);
                 if (meal) router.push(`/recipes/${meal.mealId}`);
@@ -424,7 +477,7 @@ export function WeeklyView({
               onClick={() => {
                 const target = actionTarget;
                 setActionOpen(false);
-                if (target) openPicker(target.dayIndex, target.category);
+                if (target) openPicker(target.colIdx, target.category);
               }}
             >
               <ArrowLeftRight className="h-5 w-5" />
@@ -436,7 +489,7 @@ export function WeeklyView({
               onClick={() => {
                 const target = actionTarget;
                 setActionOpen(false);
-                if (target) removeMeal(target.dayIndex, target.category);
+                if (target) removeMeal(target.colIdx, target.category);
               }}
             >
               <Trash2 className="h-5 w-5" />
@@ -455,7 +508,7 @@ export function WeeklyView({
         onRemove={
           pickerTarget
             ? () => {
-                removeMeal(pickerTarget.dayIndex, pickerTarget.category);
+                removeMeal(pickerTarget.colIdx, pickerTarget.category);
                 setPickerOpen(false);
               }
             : undefined
@@ -533,16 +586,27 @@ export function WeeklyView({
 function GridCell({
   meal,
   cookable,
+  inRange,
   onTap,
   onMealTap,
   onCook,
 }: {
   meal: PlanMeal | undefined;
   cookable: boolean;
+  inRange: boolean;
   onTap: () => void;
   onMealTap: () => void;
   onCook: () => void;
 }) {
+  if (!inRange) {
+    return (
+      <div
+        className="flex-1 rounded-lg bg-muted/20 border border-dashed border-border/30 min-h-0"
+        aria-hidden
+      />
+    );
+  }
+
   if (!meal) {
     return (
       <button

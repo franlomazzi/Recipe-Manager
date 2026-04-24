@@ -15,19 +15,40 @@ export type IngredientCategory =
 
 export type Difficulty = "easy" | "medium" | "hard";
 
+/**
+ * Reference serving captured from the linked library ingredient at the moment
+ * it was picked. Macros on the parent Ingredient are always the scaled values
+ * for the recipe's quantity; `reference.calories` etc. are the per-serving
+ * baseline so we (and the food tracking app) can re-scale if the quantity
+ * later changes. Presence of `reference` means the ingredient is linked.
+ */
+export interface IngredientReference {
+  amount: number;
+  unit: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber?: number;
+  netCarbs?: number;
+}
+
 export interface Ingredient {
   id: string;
   quantity: number | null;
   /**
    * Canonical unit from src/lib/unit-standards.ts (shared with the food
-   * tracking app). Legacy recipes may contain non-canonical free-text;
+   * tracking app). When `reference` is set, this is locked to
+   * `reference.unit` — scaling only makes sense against the library's
+   * reference serving. Legacy recipes may contain non-canonical free-text;
    * it's normalized on next save via the recipe form.
    */
   unit: string;
   name: string;
   category: IngredientCategory;
   note: string;
-  // Macros from food tracking app (preserved on round-trip, not editable in Recipe Manager)
+  // Macros scaled to `quantity` (derived from reference × quantity/reference.amount
+  // when linked; free-form when unlinked).
   calories?: number;
   protein?: number;
   carbs?: number;
@@ -35,9 +56,14 @@ export interface Ingredient {
   fiber?: number;
   netCarbs?: number;
   isAiGenerated?: boolean;
+  // Library reference serving — only set when linked to a library ingredient.
+  reference?: IngredientReference;
 }
 
-// Firestore format used by the food tracking app in nutrition_meals collection
+// Firestore format used by the food tracking app in nutrition_meals collection.
+// `amount`/`calories`/... are the recipe's actual (scaled) values. The
+// `reference*` fields hold the library's per-serving baseline so the food
+// tracker can re-scale on edit or re-sync when library macros change.
 export interface FirestoreMealIngredient {
   foodId: string;
   name: string;
@@ -50,6 +76,14 @@ export interface FirestoreMealIngredient {
   fiber?: number;
   netCarbs?: number;
   isAiGenerated?: boolean;
+  referenceAmount?: number;
+  referenceUnit?: string;
+  referenceCalories?: number;
+  referenceProtein?: number;
+  referenceCarbs?: number;
+  referenceFat?: number;
+  referenceFiber?: number;
+  referenceNetCarbs?: number;
 }
 
 export interface IngredientExtension {

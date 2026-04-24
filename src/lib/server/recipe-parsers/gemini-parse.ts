@@ -13,7 +13,7 @@ import { normalizeToMetric } from "./unit-convert";
 import { fetchRecipePage, normalizeImportUrl, UrlFetchError } from "./fetch-url";
 import { extractRecipeContent } from "./html-extract";
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3-flash-preview";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 // Hard cap on pasted text so a single bad source can't burn the whole
@@ -97,6 +97,7 @@ async function doCallGemini(opts: CallOptions): Promise<DraftRecipe> {
       responseMimeType: "application/json",
       responseSchema: RECIPE_RESPONSE_SCHEMA,
       temperature: 0.2,
+      thinkingConfig: { thinkingBudget: 0 },
     },
   };
 
