@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
+import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { usePlanTemplates } from "@/lib/hooks/use-plan-templates";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import {
@@ -38,6 +39,7 @@ import type { PlanTemplate } from "@/lib/types/meal-plan";
 
 export default function MealPlanPage() {
   const { user } = useAuth();
+  const isKT = useKitchenTool();
   const { templates, loading: templatesLoading } = usePlanTemplates();
   const { instance, loading: planLoading } = useActivePlan();
 
@@ -95,6 +97,124 @@ export default function MealPlanPage() {
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // ─── KT Templates view ───
+  if (isKT && (showTemplates || !instance)) {
+    return (
+      <div className="kt-meal-plan mx-auto max-w-5xl px-5 py-6 md:px-8 md:py-10">
+        <div className="flex items-center justify-between border-b border-[var(--border)] pb-5">
+          <div>
+            <div className="kt-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+              {instance ? "Library" : "Kitchen"} &middot; Plans
+            </div>
+            <h1 className="kt-serif mt-1 text-3xl font-medium md:text-4xl">
+              {instance ? "Templates" : "Meal Plan"}
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            {instance && (
+              <button
+                onClick={() => setShowTemplates(false)}
+                className="kt-mono flex items-center gap-1.5 border border-[var(--border)] px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="h-3 w-3" /> Back
+              </button>
+            )}
+            <button
+              onClick={handleCreateTemplate}
+              className="kt-mono flex items-center gap-1.5 bg-primary px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-primary-foreground"
+            >
+              <Plus className="h-3 w-3" /> New
+            </button>
+          </div>
+        </div>
+
+        {!instance && (
+          <p className="kt-serif mt-6 max-w-xl text-base italic text-muted-foreground">
+            Create a template, then start a plan to see your weekly menu laid out as a ledger.
+          </p>
+        )}
+
+        {templates.length === 0 ? (
+          <div className="mt-8 border border-dashed border-[var(--border)] px-6 py-16 text-center">
+            <LayoutTemplate className="mx-auto h-8 w-8 text-muted-foreground/50" />
+            <p className="kt-mono mt-3 text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+              No templates yet
+            </p>
+          </div>
+        ) : (
+          <div className="mt-6 border-t border-[var(--border)]">
+            <div className="hidden grid-cols-[2fr_auto_auto_auto] items-center gap-4 border-b border-[var(--border)] px-2 py-2 md:grid">
+              <span className="kt-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Template</span>
+              <span className="kt-mono text-right text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Weeks</span>
+              <span className="kt-mono text-right text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Meals</span>
+              <span className="kt-mono text-right text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Actions</span>
+            </div>
+            {templates.map((template) => (
+              <div
+                key={template.id}
+                className="grid grid-cols-1 gap-3 border-b border-[var(--border)] px-2 py-4 md:grid-cols-[2fr_auto_auto_auto] md:items-center md:gap-4"
+              >
+                <div className="min-w-0">
+                  <h3 className="kt-serif truncate text-lg font-medium">{template.name}</h3>
+                  {template.description && (
+                    <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                      {template.description}
+                    </p>
+                  )}
+                </div>
+                <div className="kt-mono text-right text-sm tabular-nums">
+                  {template.weeks.length}w
+                </div>
+                <div className="kt-mono text-right text-sm tabular-nums text-muted-foreground">
+                  {countMeals(template)}
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => handleStartPlan(template)}
+                    disabled={!!instance}
+                    className="kt-mono flex items-center gap-1.5 bg-primary px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-primary-foreground disabled:opacity-40"
+                  >
+                    <Play className="h-3 w-3" /> Start
+                  </button>
+                  <button
+                    onClick={() => handleEditTemplate(template)}
+                    className="flex h-7 w-7 items-center justify-center border border-[var(--border)] text-muted-foreground hover:text-foreground"
+                    aria-label="Edit"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTemplate(template)}
+                    className="flex h-7 w-7 items-center justify-center border border-[var(--border)] text-muted-foreground hover:text-destructive"
+                    aria-label="Delete"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <TemplateEditor
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          template={editingTemplate}
+        />
+        {startingTemplate && (
+          <StartPlanDialog
+            open={startDialogOpen}
+            onOpenChange={(open) => {
+              setStartDialogOpen(open);
+              if (!open) setShowTemplates(false);
+            }}
+            template={startingTemplate}
+          />
+        )}
       </div>
     );
   }
@@ -236,7 +356,7 @@ export default function MealPlanPage() {
 
   // ─── Active plan view (full-bleed) ───
   return (
-    <div className="flex h-full flex-col p-2 md:p-3">
+    <div className={`flex h-full flex-col p-2 md:p-3${isKT ? " kt-meal-plan" : ""}`}>
       <WeeklyView
         instance={instance}
         onShowTemplates={() => setShowTemplates(true)}

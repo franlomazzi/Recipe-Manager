@@ -157,6 +157,39 @@ export default function RecipeDetailPage() {
 
   const adjustedServings = recipe.servings * servingMultiplier;
 
+  // Branch early for the experimental Kitchen Tool layout.
+  if (isKT && recipe) {
+    return (
+      <KitchenToolRecipeDetail
+        recipe={recipe}
+        isMine={isMine}
+        servingMultiplier={servingMultiplier}
+        setServingMultiplier={setServingMultiplier}
+        isCurrentlyCooking={isCurrentlyCooking}
+        onStartCook={() => {
+          setCookServings(recipe.servings * servingMultiplier);
+          setShowCookDialog(true);
+        }}
+        onAddToShopping={() => setShowShoppingDialog(true)}
+        onToggleFavorite={handleToggleFavorite}
+        cookLogs={cookLogs}
+        showCookDialog={showCookDialog}
+        setShowCookDialog={setShowCookDialog}
+        cookServings={cookServings}
+        setCookServings={setCookServings}
+        showShoppingDialog={showShoppingDialog}
+        setShowShoppingDialog={setShowShoppingDialog}
+        activePlan={activePlan}
+        shoppingWeekIndex={shoppingWeekIndex}
+        setShoppingWeekIndex={setShoppingWeekIndex}
+        shoppingWeekRange={shoppingWeekRange}
+        addingToShopping={addingToShopping}
+        handleAddToShoppingList={handleAddToShoppingList}
+        router={router}
+      />
+    );
+  }
+
   function scaleQuantity(qty: number | null): string {
     if (qty === null) return "";
     const scaled = qty * servingMultiplier;
@@ -1011,6 +1044,377 @@ export default function RecipeDetailPage() {
           </DialogContent>
         </Dialog>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* =====================================================================
+   Kitchen Tool — Recipe detail "Cookbook page" layout.
+   Mirrors screens-detail.jsx DetailA:
+   - Full-bleed hero photo with floating back/heart buttons
+   - Category eyebrow + serif title + italic serif subtitle
+   - 4-col hairline stats strip (PREP/COOK/SERVES/RATING)
+   - Full-width primary "Start cooking" action
+   - Ingredients: 3-col grid (checkbox / mono qty right-aligned / name)
+     with hairline dividers, inline ×N servings adjuster
+   - Method: big serif brand-colored step numbers, text, timer chip
+   ===================================================================== */
+type KTDetailProps = {
+  recipe: import("@/lib/types/recipe").Recipe;
+  isMine: boolean;
+  servingMultiplier: number;
+  setServingMultiplier: (fn: (m: number) => number) => void;
+  isCurrentlyCooking: boolean;
+  onStartCook: () => void;
+  onAddToShopping: () => void;
+  onToggleFavorite: () => void;
+  cookLogs: CookLog[];
+  showCookDialog: boolean;
+  setShowCookDialog: (b: boolean) => void;
+  cookServings: number;
+  setCookServings: (fn: number | ((s: number) => number)) => void;
+  showShoppingDialog: boolean;
+  setShowShoppingDialog: (b: boolean) => void;
+  activePlan: ReturnType<typeof useActivePlan>["instance"];
+  shoppingWeekIndex: number;
+  setShoppingWeekIndex: (fn: number | ((i: number) => number)) => void;
+  shoppingWeekRange: { start: Date; end: Date } | null;
+  addingToShopping: boolean;
+  handleAddToShoppingList: () => void | Promise<void>;
+  router: ReturnType<typeof useRouter>;
+};
+
+function KitchenToolRecipeDetail(props: KTDetailProps) {
+  const {
+    recipe, isMine, servingMultiplier, setServingMultiplier,
+    isCurrentlyCooking, onStartCook, onAddToShopping, onToggleFavorite,
+    cookLogs, showCookDialog, setShowCookDialog, cookServings, setCookServings,
+    showShoppingDialog, setShowShoppingDialog, activePlan,
+    shoppingWeekIndex, setShoppingWeekIndex, shoppingWeekRange,
+    addingToShopping, handleAddToShoppingList, router,
+  } = props;
+
+  const adjustedServings = recipe.servings * servingMultiplier;
+  const totalTime = recipe.totalTime || (recipe.prepTime + recipe.cookTime);
+
+  function scaleQty(qty: number | null): string {
+    if (qty === null) return "";
+    const scaled = qty * servingMultiplier;
+    return scaled % 1 === 0 ? String(scaled) : scaled.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  const categoryLine = recipe.categories.length > 0
+    ? recipe.categories.slice(0, 2).join(" · ").toUpperCase()
+    : "RECIPE";
+
+  return (
+    <div className="kt-recipe-detail max-w-3xl mx-auto pb-24">
+      {/* Hero photo, full-bleed */}
+      <div className="relative -mx-4 md:-mx-6">
+        {recipe.photoURL ? (
+          <div className="aspect-[16/10] md:aspect-[21/9] overflow-hidden">
+            <img src={recipe.photoURL} alt={recipe.title} className="h-full w-full object-cover" />
+          </div>
+        ) : (
+          <div
+            className="aspect-[16/10] md:aspect-[21/9]"
+            style={{
+              background:
+                "repeating-linear-gradient(135deg, var(--kt-paper-deep) 0 6px, var(--background) 6px 12px)",
+            }}
+          />
+        )}
+        <div className="absolute top-3 left-3 right-3 flex justify-between">
+          <button
+            onClick={() => router.push("/recipes")}
+            className="h-9 w-9 rounded-md bg-white/90 hover:bg-white flex items-center justify-center text-foreground shadow-sm"
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div className="flex gap-1.5">
+            <button
+              onClick={onToggleFavorite}
+              className="h-9 w-9 rounded-md bg-white/90 hover:bg-white flex items-center justify-center shadow-sm"
+              aria-label="Favorite"
+            >
+              <Heart className={`h-4 w-4 ${recipe.isFavorite ? "fill-primary text-primary" : "text-foreground"}`} />
+            </button>
+            {isMine && (
+              <Link
+                href={`/recipes/${recipe.id}/edit`}
+                className="h-9 w-9 rounded-md bg-white/90 hover:bg-white flex items-center justify-center text-foreground shadow-sm"
+                aria-label="Edit"
+              >
+                <Edit className="h-4 w-4" />
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Title block */}
+      <div className="px-1 md:px-2 pt-6">
+        <div className="kt-eyebrow">{categoryLine}</div>
+        <h1 className="kt-serif text-4xl md:text-5xl font-medium tracking-tight leading-[1.08] mt-2">
+          {recipe.title}
+        </h1>
+        {recipe.description && (
+          <p className="kt-serif italic text-base md:text-lg leading-snug mt-3 text-muted-foreground">
+            {recipe.description}
+          </p>
+        )}
+
+        {/* Stats strip — 4-col, hairline-divided */}
+        <div
+          className="mt-5 grid grid-cols-4 border kt-hair"
+          style={{ borderRadius: "var(--radius-sm)" }}
+        >
+          <StatCell label="PREP" value={String(recipe.prepTime || "—")} unit={recipe.prepTime ? "min" : ""} first />
+          <StatCell label="COOK" value={String(recipe.cookTime || "—")} unit={recipe.cookTime ? "min" : ""} />
+          <StatCell label="SERVES" value={String(adjustedServings)} unit="" />
+          <StatCell
+            label="RATING"
+            value={recipe.rating != null ? recipe.rating.toFixed(1) : "—"}
+            unit={recipe.rating != null ? "★" : ""}
+          />
+        </div>
+
+        {/* Primary action */}
+        <div className="mt-4 flex gap-1.5">
+          {isCurrentlyCooking ? (
+            <Button size="lg" className="flex-1" render={<Link href="/cook" />}>
+              <ChefHat className="mr-2 h-4 w-4" />
+              Back to cooking
+            </Button>
+          ) : (
+            <Button size="lg" className="flex-1" onClick={onStartCook}>
+              <Play className="mr-2 h-4 w-4" />
+              Start cooking
+            </Button>
+          )}
+          <Button
+            size="lg"
+            variant="outline"
+            className="w-11 px-0"
+            onClick={onAddToShopping}
+            disabled={recipe.ingredients.length === 0}
+            aria-label="Add to shopping list"
+          >
+            <ShoppingCart className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {totalTime > 0 && (
+          <div className="mt-3 text-xs text-muted-foreground kt-mono">
+            total {totalTime} min · {recipe.difficulty.toLowerCase()}
+            {(recipe.version ?? 1) > 1 && ` · v${recipe.version}`}
+          </div>
+        )}
+      </div>
+
+      {/* Ingredients */}
+      <section className="mt-8 px-1 md:px-2">
+        <div className="flex items-baseline justify-between">
+          <h2 className="kt-serif text-2xl font-medium tracking-tight">Ingredients</h2>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="kt-mono">×{servingMultiplier}</span>
+            <button
+              className="kt-mini-btn"
+              onClick={() => setServingMultiplier((m) => Math.max(0.5, m - 0.5))}
+              aria-label="Decrease"
+            >
+              <Minus className="h-2.5 w-2.5" />
+            </button>
+            <span className="kt-mono w-4 text-center">{adjustedServings}</span>
+            <button
+              className="kt-mini-btn"
+              onClick={() => setServingMultiplier((m) => m + 0.5)}
+              aria-label="Increase"
+            >
+              <Plus className="h-2.5 w-2.5" />
+            </button>
+            <span className="ml-0.5">servings</span>
+          </div>
+        </div>
+        <div className="mt-3 border-t kt-hair">
+          {recipe.ingredients.map((ing) => (
+            <div
+              key={ing.id}
+              className="grid grid-cols-[20px_56px_1fr] gap-2.5 py-2.5 border-b kt-hair items-baseline"
+            >
+              <div className="mt-1 h-3.5 w-3.5 border kt-hair" style={{ borderWidth: "1.4px", borderRadius: "3px", borderColor: "var(--kt-rule-strong)" }} />
+              <div className="kt-mono text-[13px] font-semibold text-right">
+                {ing.quantity !== null && scaleQty(ing.quantity)}
+                {ing.unit && (
+                  <span className="font-normal text-muted-foreground ml-1">{ing.unit}</span>
+                )}
+              </div>
+              <div className="text-[13.5px] leading-snug">
+                {ing.name}
+                {ing.note && (
+                  <span className="kt-serif italic text-muted-foreground text-[12.5px] ml-1">
+                    — {ing.note}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Method */}
+      <section className="mt-8 px-1 md:px-2">
+        <h2 className="kt-serif text-2xl font-medium tracking-tight">Method</h2>
+        <div className="mt-3">
+          {recipe.steps.map((step, i) => (
+            <div
+              key={step.id}
+              className={`grid grid-cols-[32px_1fr] gap-3.5 py-3 ${
+                i < recipe.steps.length - 1 ? "border-b kt-hair" : ""
+              }`}
+            >
+              <div className="kt-serif text-[26px] font-medium leading-none tracking-tight text-primary">
+                {i + 1}
+              </div>
+              <div>
+                <p className="text-sm leading-[1.5]">{step.instruction}</p>
+                {step.timerMinutes && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 border kt-hair px-2 py-0.5" style={{ borderRadius: "4px", borderColor: "var(--kt-rule-strong)" }}>
+                    <Clock className="h-3 w-3" />
+                    <span className="kt-mono text-[11px] font-semibold">
+                      {step.timerMinutes}:00
+                    </span>
+                    {step.timerLabel && (
+                      <span className="text-[11px] text-muted-foreground">· {step.timerLabel}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Notes */}
+      {recipe.notes && (
+        <section className="mt-8 px-1 md:px-2">
+          <h2 className="kt-serif text-2xl font-medium tracking-tight">Notes</h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+            {recipe.notes}
+          </p>
+        </section>
+      )}
+
+      {/* Cook history (condensed) */}
+      {cookLogs.length > 0 && cookLogs[0].cookedAt?.toDate?.() && (
+        <section className="mt-8 px-1 md:px-2">
+          <div className="kt-eyebrow">LAST COOKED</div>
+          <p className="kt-mono text-xs text-muted-foreground mt-1">
+            {formatDistanceToNow(cookLogs[0].cookedAt.toDate(), { addSuffix: true })}
+            {" · "}
+            {cookLogs.length} {cookLogs.length === 1 ? "session" : "sessions"}
+          </p>
+        </section>
+      )}
+
+      <RecipeSourceLine url={recipe.sourceUrl ?? null} />
+
+      {/* Dialogs — reuse existing markup via minimal inline versions */}
+      {showCookDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm border kt-hair bg-card" style={{ borderRadius: "var(--radius)" }}>
+            <div className="px-6 pt-6 pb-2">
+              <h3 className="kt-serif text-xl font-semibold">How many servings?</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Quantities will be scaled to your chosen amount.
+              </p>
+            </div>
+            <div className="px-6 py-4 flex items-center justify-center gap-4">
+              <Button variant="outline" size="icon" className="h-10 w-10" onClick={() => setCookServings((s) => Math.max(0.5, (typeof s === "number" ? s : 1) - 0.5))} disabled={cookServings <= 0.5}>
+                <Minus className="h-4 w-4" />
+              </Button>
+              <div className="text-center min-w-[100px]">
+                <span className="kt-mono text-3xl font-bold">{cookServings}</span>
+                <p className="text-sm text-muted-foreground">servings</p>
+              </div>
+              <Button variant="outline" size="icon" className="h-10 w-10" onClick={() => setCookServings((s) => (typeof s === "number" ? s : 1) + 0.5)}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex gap-2 px-6 pb-6 pt-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowCookDialog(false)}>Cancel</Button>
+              <Button
+                className="flex-1"
+                onClick={() => {
+                  setShowCookDialog(false);
+                  router.push(`/recipes/${recipe.id}/cook?servings=${cookServings}`);
+                }}
+              >
+                <Play className="mr-2 h-4 w-4" />
+                Start cooking
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showShoppingDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm border kt-hair bg-card" style={{ borderRadius: "var(--radius)" }}>
+            <div className="px-6 pt-6 pb-2">
+              <h3 className="kt-serif text-xl font-semibold">Add to shopping list</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {recipe.ingredients.length} ingredient{recipe.ingredients.length === 1 ? "" : "s"} · {servingMultiplier === 1 ? "default servings" : `${servingMultiplier}× servings`}
+              </p>
+            </div>
+            {activePlan ? (
+              <div className="px-6 py-4">
+                <p className="kt-eyebrow mb-2">Add to week</p>
+                <div className="flex items-center gap-3 border kt-hair bg-secondary/40 px-3 py-2" style={{ borderRadius: "var(--radius-sm)" }}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex === 0} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) - 1)}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="flex-1 text-center">
+                    <p className="text-sm font-semibold">Week {shoppingWeekIndex + 1}</p>
+                    {shoppingWeekRange && (
+                      <p className="text-xs text-muted-foreground kt-mono">
+                        {format(shoppingWeekRange.start, "MMM d")} – {format(shoppingWeekRange.end, "MMM d")}
+                      </p>
+                    )}
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex >= activePlan.snapshot.length - 1} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) + 1)}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="px-6 py-4">
+                <p className="text-sm text-muted-foreground">Ingredients will be added to your shopping list.</p>
+              </div>
+            )}
+            <div className="flex gap-2 px-6 pb-6 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setShowShoppingDialog(false)}>Cancel</Button>
+              <Button className="flex-1" onClick={handleAddToShoppingList} disabled={addingToShopping}>
+                {addingToShopping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShoppingCart className="mr-2 h-4 w-4" />}
+                Add ingredients
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCell({ label, value, unit, first }: { label: string; value: string; unit: string; first?: boolean }) {
+  return (
+    <div className={`px-2 py-2.5 text-center ${first ? "" : "border-l kt-hair"}`}>
+      <div className="text-[9px] font-semibold tracking-wider text-muted-foreground">{label}</div>
+      <div className="kt-mono text-base font-semibold mt-1 tracking-tight">
+        {value}
+        {unit && <span className="text-[10px] text-muted-foreground ml-0.5">{unit}</span>}
       </div>
     </div>
   );
