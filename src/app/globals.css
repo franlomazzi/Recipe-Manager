@@ -8,8 +8,9 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+  --font-heading: var(--font-heading);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,6 +49,14 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Default font stacks — overridden by .kitchen-tool */
+:root {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-geist-sans);
+  --font-heading: var(--font-geist-sans);
 }
 
 /* Modern warm light theme */
@@ -152,3 +161,279 @@
     box-shadow: 0 2px 8px oklch(0 0 0 / 0.25), 0 8px 24px oklch(0 0 0 / 0.2);
   }
 }
+
+/* =====================================================================
+   Kitchen Tool theme — experimental opt-in redesign
+   Warm paper + terracotta + hairline borders + serif recipe titles.
+   Applied by adding `.kitchen-tool` class (or `.kitchen-tool.dark`
+   for the cooking mode full-bleed treatment).
+   ===================================================================== */
+.kitchen-tool,
+.kitchen-tool-dark {
+  /* Palette — paper + terracotta */
+  --background: #F6F2EB;
+  --foreground: #1C1A17;
+  --card: #FFFFFF;
+  --card-foreground: #1C1A17;
+  --popover: #FFFFFF;
+  --popover-foreground: #1C1A17;
+  --primary: #C24A1E;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDE7DC;
+  --secondary-foreground: #3E3A33;
+  --muted: #EDE7DC;
+  --muted-foreground: #6E665A;
+  --accent: #3E6B3A;
+  --accent-foreground: #FFFFFF;
+  --success: #3E6B3A;
+  --success-foreground: #FFFFFF;
+  --destructive: #B83B2E;
+  --border: #E2DCD0;
+  --input: #E2DCD0;
+  --ring: #C24A1E;
+  --chart-1: #C24A1E;
+  --chart-2: #3E6B3A;
+  --chart-3: #D9A636;
+  --chart-4: #2A3542;
+  --chart-5: #9A3A14;
+
+  /* Kitchen-tool, not mobile-app rounded */
+  --radius: 0.375rem;
+
+  --sidebar: #EDE7DC;
+  --sidebar-foreground: #1C1A17;
+  --sidebar-primary: #C24A1E;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F6F2EB;
+  --sidebar-accent-foreground: #3E3A33;
+  --sidebar-border: #E2DCD0;
+  --sidebar-ring: #C24A1E;
+
+  /* Kitchen-tool typography */
+  --font-sans: var(--font-inter-tight), var(--font-geist-sans), system-ui, sans-serif;
+  --font-serif: var(--font-eb-garamond), "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), var(--font-geist-mono), ui-monospace, monospace;
+  --font-heading: var(--font-inter-tight), var(--font-geist-sans), system-ui, sans-serif;
+
+  /* Extra tokens used by redesigned surfaces */
+  --kt-paper-deep: #EDE7DC;
+  --kt-ink2: #3E3A33;
+  --kt-ink3: #6E665A;
+  --kt-ink4: #A89F90;
+  --kt-rule: #E2DCD0;
+  --kt-rule-strong: #CFC7B8;
+  --kt-brand: #C24A1E;
+  --kt-brand-deep: #9A3A14;
+  --kt-brand-wash: #F7E8DF;
+  --kt-brand-rule: #E9C9B6;
+  --kt-herb: #3E6B3A;
+  --kt-herb-wash: #E6EEE0;
+  --kt-tomato: #B83B2E;
+  --kt-yolk: #D9A636;
+  --kt-slate: #2A3542;
+}
+
+/* Kitchen Tool — dark variant (cooking mode / opt-in) */
+.kitchen-tool.dark,
+.kitchen-tool-dark {
+  --background: #15120E;
+  --foreground: #F6F2EB;
+  --card: #1E1A14;
+  --card-foreground: #F6F2EB;
+  --popover: #1E1A14;
+  --popover-foreground: #F6F2EB;
+  --primary: #E0663A;
+  --primary-foreground: #15120E;
+  --secondary: #23201A;
+  --secondary-foreground: #F6F2EB;
+  --muted: #23201A;
+  --muted-foreground: #A89F90;
+  --accent: #6FA068;
+  --accent-foreground: #15120E;
+  --success: #6FA068;
+  --success-foreground: #15120E;
+  --destructive: #D85545;
+  --border: #2F2A22;
+  --input: #2F2A22;
+  --ring: #E0663A;
+  --sidebar: #1E1A14;
+  --sidebar-foreground: #F6F2EB;
+  --sidebar-primary: #E0663A;
+  --sidebar-primary-foreground: #15120E;
+  --sidebar-accent: #23201A;
+  --sidebar-accent-foreground: #F6F2EB;
+  --sidebar-border: #2F2A22;
+  --sidebar-ring: #E0663A;
+
+  --kt-paper-deep: #23201A;
+  --kt-ink2: #E2DCD0;
+  --kt-ink3: #A89F90;
+  --kt-ink4: #6E665A;
+  --kt-rule: #2F2A22;
+  --kt-rule-strong: #3A342A;
+  --kt-brand-wash: #2A1A12;
+  --kt-brand-rule: #4A2818;
+  --kt-herb-wash: #1C241A;
+}
+
+/* Kitchen Tool — kill shadows, use hairlines only */
+:is(.kitchen-tool, .kitchen-tool-dark) .card-elevated,
+:is(.kitchen-tool, .kitchen-tool-dark) .card-elevated:hover,
+:is(.kitchen-tool, .kitchen-tool-dark) [class*="shadow-"] {
+  box-shadow: none !important;
+}
+
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--kt-ink3);
+}
+
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-serif {
+  font-family: var(--font-serif);
+  font-feature-settings: "liga", "dlig";
+  letter-spacing: -0.01em;
+}
+
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-mono,
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-mono {
+  font-family: var(--font-mono);
+}
+
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-hair {
+  border-color: var(--kt-rule);
+}
+
+/* Kitchen Tool — Recipe detail "cookbook page" treatment.
+   Scoped to .kt-recipe-detail so it only applies inside the detail page
+   when the user is on the kitchen-tool theme. */
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail h1 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail h2 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail .font-semibold {
+  /* Scale quantities in ingredients with tabular numerals */
+  font-variant-numeric: tabular-nums;
+}
+/* Step "cards" become hairline-separated rows. */
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-recipe-detail .card-elevated {
+  border: 1px solid var(--kt-rule) !important;
+  background: var(--card) !important;
+}
+
+/* Kitchen Tool — Cooking mode "full-bleed / timer-as-hero" treatment */
+.kt-cook {
+  /* Kitchen mode is dark as a deliberate state change — signals focus. */
+  background: #15120E !important;
+  color: #F6F2EB;
+}
+.kt-cook * { border-color: #2F2A22; }
+.kt-cook .bg-muted { background: #23201A; }
+.kt-cook .bg-primary { background: #E0663A; }
+.kt-cook .text-primary { color: #E0663A; }
+.kt-cook .text-muted-foreground { color: #A89F90; }
+.kt-cook .bg-card { background: #1E1A14; }
+.kt-cook .bg-background { background: #15120E; }
+
+/* Make the step-timer numerals huge inside cook mode */
+.kt-cook .kt-cook-timer {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: clamp(3.5rem, 10vw, 7rem);
+  line-height: 1;
+}
+/* Enlarge the timer's circular progress ring too */
+.kt-cook .h-36.w-36 {
+  height: 14rem;
+  width: 14rem;
+}
+@media (min-width: 768px) {
+  .kt-cook .h-36.w-36 {
+    height: 18rem;
+    width: 18rem;
+  }
+}
+
+/* Kitchen Tool — page headings default to editorial serif.
+   Opt-out: add .kt-no-serif to any heading to keep sans. */
+:is(.kitchen-tool, .kitchen-tool-dark) h1:not(.kt-no-serif),
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-page-title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Kitchen Tool — badges: squarer, tighter */
+:is(.kitchen-tool, .kitchen-tool-dark) [data-slot="badge"] {
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kitchen Tool — mono treatment for common quantity-ish spots */
+:is(.kitchen-tool, .kitchen-tool-dark) .font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Kitchen Tool — subdue hover scale on content (motion-sickness avoidance) */
+:is(.kitchen-tool, .kitchen-tool-dark) .hover\:scale-\[1\.02\]:hover,
+:is(.kitchen-tool, .kitchen-tool-dark) .hover\:scale-105:hover {
+  transform: none !important;
+}
+
+/* Kitchen Tool — shopping list ledger treatment.
+   Strip card chrome, make rows hairline-separated, quantities mono. */
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-shop [data-slot="card"],
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-shop .card-elevated {
+  border: 1px solid var(--kt-rule) !important;
+  background: transparent !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: none !important;
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-shop h3 {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.25em;
+  font-weight: 500;
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-shop [data-slot="badge"] {
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+/* Kitchen Tool — meal plan ledger treatment */
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-meal-plan [data-slot="card"] {
+  border: 1px solid var(--kt-rule) !important;
+  background: var(--card) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: none !important;
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-meal-plan h2,
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-meal-plan h3 {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+}
+:is(.kitchen-tool, .kitchen-tool-dark) .kt-meal-plan [data-slot="badge"] {
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+

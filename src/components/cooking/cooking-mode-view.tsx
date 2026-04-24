@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useWakeLock } from "@/lib/hooks/use-wake-lock";
+import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { StepTimer } from "./step-timer";
 import { CookingResults } from "./cooking-results";
@@ -36,6 +37,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
   const [showResults, setShowResults] = useState(false);
   const [servingMultiplier, setServingMultiplier] = useState(1);
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
+  const isKT = useKitchenTool();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [servingsLocked, setServingsLocked] = useState(false);
@@ -141,6 +143,279 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
         stepNotes={stepNotes}
         onClose={() => router.back()}
       />
+    );
+  }
+
+  if (isKT) {
+    const nextStep = !isLast ? steps[currentStep + 1] : null;
+    return (
+      <div
+        ref={containerRef}
+        className="kt-cook fixed inset-0 z-[60] flex flex-col bg-background text-foreground"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* Top bar */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 md:px-10">
+          <button
+            onClick={() => router.back()}
+            className="kt-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
+          >
+            &larr; Back
+          </button>
+          <div className="kt-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+            Step <span className="text-foreground">{String(currentStep + 1).padStart(2, "0")}</span>
+            <span className="mx-1.5 opacity-40">/</span>
+            <span>{String(steps.length).padStart(2, "0")}</span>
+          </div>
+          <button
+            onClick={() => router.back()}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Segmented progress */}
+        <div className="px-5 md:px-10">
+          <div className="flex gap-1.5">
+            {steps.map((_, i) => (
+              <div
+                key={i}
+                className="h-1 flex-1 rounded-sm"
+                style={{
+                  background: i <= currentStep ? "#E0663A" : "#2F2A22",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Recipe title + serving adjuster row */}
+        <div className="flex items-center justify-between px-5 pt-4 pb-2 md:px-10">
+          <h2 className="kt-serif text-lg font-medium truncate">{recipe.title}</h2>
+          <div className="flex items-center gap-2">
+            {hasImprovements && !suggestionsDismissed && (
+              <button
+                onClick={() => setShowSuggestions(true)}
+                className="relative flex h-7 w-7 items-center justify-center rounded border border-[#2F2A22]"
+                aria-label="Suggestions"
+              >
+                <Lightbulb className="h-3.5 w-3.5 text-primary" />
+                <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-primary" />
+              </button>
+            )}
+            {!servingsLocked && (
+              <button
+                onClick={() => setServingMultiplier((m) => Math.max(0.5, m - 0.5))}
+                className="flex h-7 w-7 items-center justify-center rounded border border-[#2F2A22]"
+                aria-label="Fewer servings"
+              >
+                <Minus className="h-3 w-3" />
+              </button>
+            )}
+            <span className="kt-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground min-w-[70px] text-center">
+              {adjustedServings} srv
+              {servingsLocked && servingMultiplier !== 1 && (
+                <span className="block text-[9px] text-primary">{servingMultiplier}x</span>
+              )}
+            </span>
+            {!servingsLocked && (
+              <button
+                onClick={() => setServingMultiplier((m) => m + 0.5)}
+                className="flex h-7 w-7 items-center justify-center rounded border border-[#2F2A22]"
+                aria-label="More servings"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Main */}
+        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-40 md:px-10 lg:pb-32">
+          {step.timerMinutes ? (
+            <div className="flex w-full max-w-2xl flex-col items-center gap-6">
+              <div className="kt-mono text-[11px] uppercase tracking-[0.25em] text-primary">
+                Timer &middot; {step.timerLabel || "Cook"}
+              </div>
+              <StepTimer
+                minutes={step.timerMinutes}
+                label={step.timerLabel || "Timer"}
+              />
+              <div className="mt-2 max-w-xl text-center">
+                <div className="kt-mono mb-3 text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+                  Now
+                </div>
+                <p className="kt-serif text-2xl font-medium leading-[1.25] md:text-3xl">
+                  {step.instruction}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-2xl text-center">
+              <div className="kt-mono mb-5 text-[11px] uppercase tracking-[0.25em] text-primary">
+                Now
+              </div>
+              <p className="kt-serif text-4xl font-medium leading-[1.15] md:text-6xl tracking-tight">
+                {step.instruction}
+              </p>
+            </div>
+          )}
+
+          {highlightedIngredients.length > 0 && (
+            <div className="mt-8 flex flex-wrap justify-center gap-2">
+              {highlightedIngredients.map((ing) => (
+                <div
+                  key={ing.id}
+                  className="flex items-baseline gap-2 border border-[#2F2A22] px-3 py-1.5 text-xs"
+                >
+                  {ing.quantity !== null && (
+                    <span className="kt-mono text-foreground">
+                      {scaleQuantity(ing.quantity)}
+                      {ing.unit ? ` ${ing.unit}` : ""}
+                    </span>
+                  )}
+                  <span className="text-muted-foreground">{ing.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Step note */}
+          <div className="mt-8 w-full max-w-lg">
+            {activeNoteStep === currentStep ? (
+              <div>
+                <textarea
+                  autoFocus
+                  placeholder="Note for this step…"
+                  value={stepNotes[currentStep] || ""}
+                  onChange={(e) => setStepNote(currentStep, e.target.value)}
+                  onBlur={() => {
+                    if (!stepNotes[currentStep]?.trim()) setActiveNoteStep(null);
+                  }}
+                  rows={2}
+                  className="w-full resize-none border border-[#2F2A22] bg-card px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setActiveNoteStep(null)}
+                    className="kt-mono flex items-center gap-1.5 bg-primary px-3 py-1.5 text-[11px] uppercase tracking-[0.15em] text-primary-foreground"
+                  >
+                    <Check className="h-3 w-3" />
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : stepNotes[currentStep]?.trim() ? (
+              <button
+                onClick={() => setActiveNoteStep(currentStep)}
+                className="flex w-full items-start gap-2 border border-amber-600/40 bg-amber-500/5 px-3 py-2 text-left text-xs"
+              >
+                <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <span>{stepNotes[currentStep]}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setActiveNoteStep(currentStep)}
+                className="kt-mono flex w-full items-center justify-center gap-2 border border-[#2F2A22] px-3 py-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-foreground"
+              >
+                <StickyNote className="h-3 w-3" />
+                Add step note
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom: Next peek + nav */}
+        <div className="absolute inset-x-0 bottom-0 border-t border-[#2F2A22] bg-background">
+          {nextStep && (
+            <div className="flex items-center gap-4 border-b border-[#2F2A22] px-5 py-3 md:px-10">
+              <div className="kt-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground shrink-0">
+                Next &middot; {String(currentStep + 2).padStart(2, "0")}
+              </div>
+              <p className="kt-serif flex-1 truncate text-sm text-muted-foreground">
+                {nextStep.instruction}
+              </p>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3 px-5 py-4 md:px-10">
+            <button
+              onClick={goPrev}
+              disabled={isFirst}
+              className="kt-mono flex items-center gap-2 border border-[#2F2A22] px-4 py-2.5 text-[11px] uppercase tracking-[0.2em] text-muted-foreground disabled:opacity-40 hover:text-foreground"
+            >
+              <ArrowLeft className="h-3 w-3" />
+              Prev
+            </button>
+            {isLast ? (
+              <button
+                onClick={() => setShowResults(true)}
+                className="kt-mono flex flex-1 items-center justify-center gap-2 bg-primary px-6 py-3 text-[11px] uppercase tracking-[0.2em] text-primary-foreground"
+              >
+                <ChefHat className="h-3.5 w-3.5" />
+                Finish &amp; Log
+              </button>
+            ) : (
+              <button
+                onClick={goNext}
+                className="kt-mono flex flex-1 items-center justify-center gap-2 bg-primary px-6 py-3 text-[11px] uppercase tracking-[0.2em] text-primary-foreground"
+              >
+                Next step
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Suggestions overlay */}
+        {showSuggestions && hasImprovements && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-md border border-[#2F2A22] bg-card">
+              <div className="flex items-center justify-between border-b border-[#2F2A22] px-4 py-3">
+                <div className="kt-mono text-[11px] uppercase tracking-[0.2em] text-primary">
+                  Before you start
+                </div>
+                <button onClick={() => setShowSuggestions(false)} aria-label="Close">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="max-h-[50vh] space-y-2 overflow-y-auto px-4 py-3">
+                {unappliedImprovements.map((log) => (
+                  <div key={log.id} className="border-l-2 border-primary pl-3">
+                    <p className="kt-serif text-sm">{log.improvements}</p>
+                    <p className="kt-mono mt-1 text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                      {log.cookedAt?.toDate?.()
+                        ? log.cookedAt.toDate().toLocaleDateString()
+                        : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 border-t border-[#2F2A22] px-4 py-3">
+                <button
+                  onClick={() => setShowSuggestions(false)}
+                  className="kt-mono flex-1 bg-primary px-4 py-2 text-[11px] uppercase tracking-[0.2em] text-primary-foreground"
+                >
+                  Let&apos;s cook
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSuggestions(false);
+                    setSuggestionsDismissed(true);
+                  }}
+                  className="kt-mono border border-[#2F2A22] px-4 py-2 text-[11px] uppercase tracking-[0.2em] text-muted-foreground"
+                >
+                  Skip
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     );
   }
 

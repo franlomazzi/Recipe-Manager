@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
+import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useHousehold } from "@/lib/contexts/household-context";
 import { useShoppingList } from "@/lib/hooks/use-shopping-list";
 import { useShoppingOrganization } from "@/lib/hooks/use-shopping-organization";
@@ -77,6 +78,7 @@ const UNASSIGNED = "__unassigned__";
 
 export default function ShoppingListPage() {
   const { user } = useAuth();
+  const isKT = useKitchenTool();
   const { householdId } = useHousehold();
   const { instance } = useActivePlan();
   const { locations, categories } = useShoppingOrganization();
@@ -470,11 +472,16 @@ export default function ShoppingListPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-5">
+    <div className={`p-4 md:p-6 lg:p-8 space-y-5${isKT ? " kt-shop" : ""}`}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Shopping List</h1>
+          {isKT && (
+            <div className="kt-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+              Kitchen &middot; List
+            </div>
+          )}
+          <h1 className={isKT ? "kt-serif text-3xl font-medium md:text-4xl mt-1" : "text-2xl font-bold tracking-tight"}>Shopping List</h1>
           {totalItems > 0 && (
             <p className="text-sm text-muted-foreground mt-0.5">
               {checkedCount}/{totalItems} items checked

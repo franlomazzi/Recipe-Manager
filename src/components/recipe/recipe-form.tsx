@@ -669,17 +669,21 @@ export function RecipeForm({
       // library's default unit ("tbsp") would misrepresent the recipe. Only
       // fall back to the library's servingUnit when the row has no unit yet
       // (manual-entry path where the user is picking from scratch).
+      const amount = updated[index].quantity ?? 0;
+      const ref = item.servingSize || 100;
+      const factor = amount / ref;
+
       updated[index] = {
         ...updated[index],
         id: item.id,
         name: item.name,
         unit: updated[index].unit || item.servingUnit || "",
-        calories: item.calories,
-        protein: item.protein,
-        carbs: item.carbs,
-        fat: item.fat,
-        fiber: item.fiber,
-        netCarbs: item.netCarbs,
+        calories: Math.round(item.calories * factor),
+        protein: Number((item.protein * factor).toFixed(1)),
+        carbs: Number((item.carbs * factor).toFixed(1)),
+        fat: Number((item.fat * factor).toFixed(1)),
+        ...(item.fiber !== undefined && { fiber: Number((item.fiber * factor).toFixed(1)) }),
+        ...(item.netCarbs !== undefined && { netCarbs: Number((item.netCarbs * factor).toFixed(1)) }),
         category: guessIngredientCategory(item.name),
       };
       return updated;
