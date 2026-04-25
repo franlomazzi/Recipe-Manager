@@ -87,7 +87,9 @@ export async function startPlanInstance(
   // Slice weeks from the chosen starting week
   const remainingWeeks = template.weeks.slice(startWeekIndex);
   const startDate = parseISO(startDateStr);
-  const endDate = addDays(startDate, remainingWeeks.length * 7 - 1);
+  const startDayOfWeek = (startDate.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const startMonday = addDays(startDate, -startDayOfWeek);
+  const endDate = addDays(startMonday, remainingWeeks.length * 7 - 1);
 
   const ref = doc(collection(db, INSTANCES));
   await setDoc(ref, {
@@ -201,10 +203,14 @@ export function getIndicesForDate(
   date: Date
 ): { weekIndex: number; dayIndex: number } | null {
   const start = parseISO(instance.startDate);
-  const dayOffset = differenceInCalendarDays(date, start);
-  if (dayOffset < 0 || dayOffset >= instance.snapshot.length * 7) return null;
+  const startDayOfWeek = (start.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const startMonday = addDays(start, -startDayOfWeek);
+  const offset = differenceInCalendarDays(date, startMonday);
+  const totalDays = instance.snapshot.length * 7;
+  if (differenceInCalendarDays(date, start) < 0) return null;
+  if (offset < 0 || offset >= totalDays) return null;
   return {
-    weekIndex: Math.floor(dayOffset / 7),
-    dayIndex: dayOffset % 7,
+    weekIndex: Math.floor(offset / 7),
+    dayIndex: offset % 7,
   };
 }

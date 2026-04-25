@@ -43,10 +43,10 @@ export function StartPlanDialog({
   const [starting, setStarting] = useState(false);
 
   const remainingWeeks = template.weeks.length - parseInt(startWeek);
-  const endDate = addDays(
-    parseISO(startDate),
-    remainingWeeks * 7 - 1
-  );
+  const parsedStart = parseISO(startDate);
+  const startDayOfWeek = (parsedStart.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const startMonday = addDays(parsedStart, -startDayOfWeek);
+  const endDate = addDays(startMonday, remainingWeeks * 7 - 1);
 
   async function handleStart() {
     if (!user) return;
