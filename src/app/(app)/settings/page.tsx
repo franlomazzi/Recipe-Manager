@@ -9,6 +9,7 @@ import { HouseholdManager } from "@/components/settings/household-manager";
 import { MultiAccountManager } from "@/components/settings/multi-account-manager";
 import { UnitStandardsManager } from "@/components/settings/unit-standards-manager";
 import { MealPlanPreferences } from "@/components/settings/meal-plan-preferences";
+import { IngredientLibraryManager } from "@/components/settings/ingredient-library-manager";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -54,6 +55,8 @@ export default function SettingsPage() {
       <UnitStandardsManager />
 
       <MealPlanPreferences />
+
+      <IngredientLibraryManager />
     </div>
   );
 }

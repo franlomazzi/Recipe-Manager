@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useHousehold } from "@/lib/contexts/household-context";
-import { subscribeToHouseholdLibrary } from "@/lib/firebase/ingredient-library";
+import { subscribeToUserWithSharedPantry } from "@/lib/firebase/ingredient-library";
 import type { LibraryIngredient } from "@/lib/types/recipe";
 
 export function useIngredientLibrary() {
@@ -19,7 +19,7 @@ export function useIngredientLibrary() {
       return;
     }
     setLoading(true);
-    const unsub = subscribeToHouseholdLibrary(
+    const unsub = subscribeToUserWithSharedPantry(
       user.uid,
       partnerUid,
       (ingredients) => {

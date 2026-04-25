@@ -145,25 +145,23 @@ export function WeeklyView({
 
   const { forceShow } = useMealPlanPrefs();
 
-  const usedCategories = useMemo(() => {
-    const start = parseISO(instance.startDate);
-    const startDayOfWeek = (start.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const currentWeekCategories = useMemo(() => {
     const s = new Set<string>();
-    for (let wi = 0; wi < instance.snapshot.length; wi++) {
-      const firstDayIdx = wi === 0 ? startDayOfWeek : 0;
-      for (let di = firstDayIdx; di < instance.snapshot[wi].days.length; di++) {
-        for (const m of instance.snapshot[wi].days[di].meals) s.add(m.category);
-      }
+    for (const date of weekDates) {
+      const indices = getIndicesForDate(instance, date);
+      if (!indices) continue;
+      const day = instance.snapshot[indices.weekIndex]?.days[indices.dayIndex];
+      if (day) for (const m of day.meals) s.add(m.category);
     }
     return s;
-  }, [instance.snapshot, instance.startDate]);
+  }, [instance, weekDates]);
 
   const visibleCategories = useMemo(() => {
     const filtered = MEAL_CATEGORIES.filter(
-      (c) => usedCategories.has(c) || forceShow.has(c)
+      (c) => currentWeekCategories.has(c) || forceShow.has(c)
     );
     return filtered.length === 0 ? MEAL_CATEGORIES : filtered;
-  }, [usedCategories, forceShow]);
+  }, [currentWeekCategories, forceShow]);
 
   const recipeServings = useMemo(
     () => new Map(recipes.map((r) => [r.id, r.servings])),

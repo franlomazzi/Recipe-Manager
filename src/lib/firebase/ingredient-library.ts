@@ -3,6 +3,7 @@ import {
   doc,
   setDoc,
   getDocs,
+  deleteDoc,
   query,
   where,
   onSnapshot,
@@ -96,6 +97,71 @@ export async function getLibraryIngredients(
   return snap.docs
     .map((d) => d.data() as LibraryIngredient)
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Delete a single ingredient from the user's library.
+ */
+export async function deleteLibraryIngredient(
+  userId: string,
+  ingredientId: string
+): Promise<void> {
+  await deleteDoc(doc(getDb(), COLLECTION, `${userId}_${ingredientId}`));
+}
+
+/**
+ * Subscribe to the current user's own ingredients plus the partner's pantry items only.
+ * Partner's non-pantry ingredients are excluded (each user manages their own library).
+ * Client-side pantry filter avoids a composite Firestore index.
+ *
+ * Pass `partnerUid = null` for solo users.
+ */
+export function subscribeToUserWithSharedPantry(
+  userId: string,
+  partnerUid: string | null,
+  callback: (items: LibraryIngredient[]) => void
+): Unsubscribe {
+  const db = getDb();
+  let mine: LibraryIngredient[] = [];
+  let theirPantry: LibraryIngredient[] = [];
+
+  function emit() {
+    const byId = new Map<string, LibraryIngredient>();
+    for (const it of mine) byId.set(it.id, it);
+    for (const it of theirPantry) {
+      if (!byId.has(it.id)) byId.set(it.id, it);
+    }
+    const merged = Array.from(byId.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    callback(merged);
+  }
+
+  const unsubMine = onSnapshot(
+    query(collection(db, COLLECTION), where("userId", "==", userId)),
+    (snap) => {
+      mine = snap.docs.map((d) => d.data() as LibraryIngredient);
+      emit();
+    }
+  );
+
+  let unsubTheirs: Unsubscribe = () => {};
+  if (partnerUid) {
+    unsubTheirs = onSnapshot(
+      query(collection(db, COLLECTION), where("userId", "==", partnerUid)),
+      (snap) => {
+        theirPantry = snap.docs
+          .map((d) => d.data() as LibraryIngredient)
+          .filter((i) => i.isPantryItem === true);
+        emit();
+      }
+    );
+  }
+
+  return () => {
+    unsubMine();
+    unsubTheirs();
+  };
 }
 
 /**
