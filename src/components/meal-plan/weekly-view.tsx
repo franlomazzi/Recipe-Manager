@@ -146,12 +146,17 @@ export function WeeklyView({
   const { forceShow } = useMealPlanPrefs();
 
   const usedCategories = useMemo(() => {
+    const start = parseISO(instance.startDate);
+    const startDayOfWeek = (start.getDay() + 6) % 7; // 0=Mon..6=Sun
     const s = new Set<string>();
-    for (const w of instance.snapshot)
-      for (const d of w.days)
-        for (const m of d.meals) s.add(m.category);
+    for (let wi = 0; wi < instance.snapshot.length; wi++) {
+      const firstDayIdx = wi === 0 ? startDayOfWeek : 0;
+      for (let di = firstDayIdx; di < instance.snapshot[wi].days.length; di++) {
+        for (const m of instance.snapshot[wi].days[di].meals) s.add(m.category);
+      }
+    }
     return s;
-  }, [instance.snapshot]);
+  }, [instance.snapshot, instance.startDate]);
 
   const visibleCategories = useMemo(() => {
     const filtered = MEAL_CATEGORIES.filter(
