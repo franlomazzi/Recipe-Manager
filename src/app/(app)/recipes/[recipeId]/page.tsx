@@ -64,8 +64,16 @@ import { useCookingSession } from "@/lib/contexts/cooking-session-context";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { addRecipeToWeek, subscribeToShoppingListState } from "@/lib/firebase/shopping-list";
+import { isoWeekKeyForOffset } from "@/lib/utils/week-keys";
 import type { ExtraRecipeEntry } from "@/lib/types/shopping-list";
-import { addDays, format, formatDistanceToNow, parseISO } from "date-fns";
+import {
+  addDays,
+  format,
+  formatDistanceToNow,
+  parseISO,
+  startOfWeek,
+  differenceInCalendarDays,
+} from "date-fns";
 import { ShoppingCart, ChevronLeft, ChevronRight } from "lucide-react";
 import type { CookLog, RecipeVersion } from "@/lib/types/recipe";
 import type { ShoppingListState } from "@/lib/types/shopping-list";
@@ -117,19 +125,36 @@ export default function RecipeDetailPage() {
     return unsub;
   }, [user]);
 
-  // Default shopping week to the current plan week
+  // Calendar-week helpers — same logic as weekly-view and shopping-list page
+  const calendarWeekMeta = useMemo(() => {
+    if (!activePlan) return { firstMonday: new Date(), totalWeeks: 1 };
+    const planStart = parseISO(activePlan.startDate);
+    const planEnd = addDays(planStart, activePlan.snapshot.length * 7 - 1);
+    const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
+    const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
+    const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+    return { firstMonday, totalWeeks };
+  }, [activePlan]);
+
+  // Default shopping week to the current calendar week
   useEffect(() => {
     if (!activePlan) return;
-    const idx = getIndicesForDate(activePlan, new Date());
-    setShoppingWeekIndex(idx?.weekIndex ?? 0);
+    const planStart = parseISO(activePlan.startDate);
+    const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
+    const planEnd = addDays(planStart, activePlan.snapshot.length * 7 - 1);
+    const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
+    const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+    const todayMonday = startOfWeek(new Date(), { weekStartsOn: 1 });
+    const offset = differenceInCalendarDays(todayMonday, firstMonday) / 7;
+    setShoppingWeekIndex(Math.max(0, Math.min(totalWeeks - 1, offset)));
   }, [activePlan]);
 
   const shoppingWeekRange = useMemo(() => {
     if (!activePlan) return null;
-    const start = addDays(parseISO(activePlan.startDate), shoppingWeekIndex * 7);
+    const start = addDays(calendarWeekMeta.firstMonday, shoppingWeekIndex * 7);
     const end = addDays(start, 6);
     return { start, end };
-  }, [activePlan, shoppingWeekIndex]);
+  }, [activePlan, shoppingWeekIndex, calendarWeekMeta]);
 
   const extraByWeek = useMemo(
     () => shoppingListState?.extraByWeek ?? {},
@@ -183,6 +208,7 @@ export default function RecipeDetailPage() {
         shoppingWeekIndex={shoppingWeekIndex}
         setShoppingWeekIndex={setShoppingWeekIndex}
         shoppingWeekRange={shoppingWeekRange}
+        totalShoppingWeeks={calendarWeekMeta.totalWeeks}
         addingToShopping={addingToShopping}
         handleAddToShoppingList={handleAddToShoppingList}
         router={router}
@@ -261,8 +287,11 @@ export default function RecipeDetailPage() {
   async function handleAddToShoppingList() {
     if (!user || !recipe) return;
     setAddingToShopping(true);
+    const weekKey = activePlan
+      ? isoWeekKeyForOffset(activePlan.startDate, shoppingWeekIndex)
+      : String(shoppingWeekIndex);
     try {
-      await addRecipeToWeek(user.uid, shoppingWeekIndex, {
+      await addRecipeToWeek(user.uid, weekKey, {
         recipeId: recipe.id,
         servingMultiplier: servingMultiplier,
       }, extraByWeek);
@@ -530,7 +559,7 @@ export default function RecipeDetailPage() {
                   </div>
                   <Button
                     variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-                    disabled={shoppingWeekIndex >= activePlan.snapshot.length - 1}
+                    disabled={shoppingWeekIndex >= calendarWeekMeta.totalWeeks - 1}
                     onClick={() => setShoppingWeekIndex((i) => i + 1)}
                   >
                     <ChevronRight className="h-4 w-4" />
@@ -1080,6 +1109,7 @@ type KTDetailProps = {
   shoppingWeekIndex: number;
   setShoppingWeekIndex: (fn: number | ((i: number) => number)) => void;
   shoppingWeekRange: { start: Date; end: Date } | null;
+  totalShoppingWeeks: number;
   addingToShopping: boolean;
   handleAddToShoppingList: () => void | Promise<void>;
   router: ReturnType<typeof useRouter>;
@@ -1091,7 +1121,7 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
     isCurrentlyCooking, onStartCook, onAddToShopping, onToggleFavorite,
     cookLogs, showCookDialog, setShowCookDialog, cookServings, setCookServings,
     showShoppingDialog, setShowShoppingDialog, activePlan,
-    shoppingWeekIndex, setShoppingWeekIndex, shoppingWeekRange,
+    shoppingWeekIndex, setShoppingWeekIndex, shoppingWeekRange, totalShoppingWeeks,
     addingToShopping, handleAddToShoppingList, router,
   } = props;
 
@@ -1384,7 +1414,7 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
                       </p>
                     )}
                   </div>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex >= activePlan.snapshot.length - 1} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) + 1)}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex >= totalShoppingWeeks - 1} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) + 1)}>
                     <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>

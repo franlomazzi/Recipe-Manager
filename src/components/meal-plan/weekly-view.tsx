@@ -45,6 +45,7 @@ import {
 } from "date-fns";
 import type { PlanInstance, PlanMeal, PlanDay } from "@/lib/types/meal-plan";
 import { MEAL_CATEGORIES, DAYS_OF_WEEK } from "@/lib/types/meal-plan";
+import { useMealPlanPrefs } from "@/lib/hooks/use-meal-plan-prefs";
 
 interface WeeklyViewProps {
   instance: PlanInstance;
@@ -141,6 +142,23 @@ export function WeeklyView({
     () => new Set(recipes.filter((r) => r.steps.length > 0).map((r) => r.id)),
     [recipes]
   );
+
+  const { forceShow } = useMealPlanPrefs();
+
+  const usedCategories = useMemo(() => {
+    const s = new Set<string>();
+    for (const w of instance.snapshot)
+      for (const d of w.days)
+        for (const m of d.meals) s.add(m.category);
+    return s;
+  }, [instance.snapshot]);
+
+  const visibleCategories = useMemo(() => {
+    const filtered = MEAL_CATEGORIES.filter(
+      (c) => usedCategories.has(c) || forceShow.has(c)
+    );
+    return filtered.length === 0 ? MEAL_CATEGORIES : filtered;
+  }, [usedCategories, forceShow]);
 
   const recipeServings = useMemo(
     () => new Map(recipes.map((r) => [r.id, r.servings])),
@@ -338,7 +356,7 @@ export function WeeklyView({
                 This day is outside the plan range.
               </div>
             ) : (
-              MEAL_CATEGORIES.map((category) => {
+              visibleCategories.map((category) => {
                 const meal = getMeal(selectedDay, category);
                 const cookable = meal ? cookableIds.has(meal.mealId) : false;
                 return (
@@ -395,7 +413,7 @@ export function WeeklyView({
           </div>
 
           {/* One row per meal category */}
-          {MEAL_CATEGORIES.map((category) => (
+          {visibleCategories.map((category) => (
             <div
               key={category}
               className="grid flex-1 min-h-0 gap-1 lg:gap-1.5 2xl:max-h-[160px]"

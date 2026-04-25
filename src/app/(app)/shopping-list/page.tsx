@@ -28,6 +28,8 @@ import {
   removePantryItemId,
 } from "@/lib/firebase/household-pantry";
 import { usePantryItems } from "@/lib/hooks/use-pantry-items";
+import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
+import type { LibraryIngredient } from "@/lib/types/recipe";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,7 +70,13 @@ import {
   Package,
   RotateCcw,
 } from "lucide-react";
-import { addDays, format, parseISO } from "date-fns";
+import {
+  addDays,
+  format,
+  parseISO,
+  startOfWeek,
+  differenceInCalendarDays,
+} from "date-fns";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import type { ShoppingItem, CustomShoppingItem } from "@/lib/types/shopping-list";
 import { toast } from "sonner";
@@ -83,12 +91,32 @@ export default function ShoppingListPage() {
   const { instance } = useActivePlan();
   const { locations, categories } = useShoppingOrganization();
 
+  // Calendar-week offset: 0 = Monday of the week containing plan start.
+  // Computed the same way as weekly-view so the two pages stay in sync.
+  const calendarWeekMeta = useMemo(() => {
+    if (!instance) return { firstMonday: new Date(), totalWeeks: 1 };
+    const planStart = parseISO(instance.startDate);
+    const planEnd = addDays(planStart, instance.snapshot.length * 7 - 1);
+    const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
+    const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
+    const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+    return { firstMonday, totalWeeks };
+  }, [instance]);
+
   const [weekIndex, setWeekIndex] = useState(() => {
     if (!instance) return 0;
-    return getIndicesForDate(instance, new Date())?.weekIndex ?? 0;
+    const planStart = parseISO(instance.startDate);
+    const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
+    const planEnd = addDays(planStart, instance.snapshot.length * 7 - 1);
+    const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
+    const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+    const todayMonday = startOfWeek(new Date(), { weekStartsOn: 1 });
+    const offset = differenceInCalendarDays(todayMonday, firstMonday) / 7;
+    return Math.max(0, Math.min(totalWeeks - 1, offset));
   });
 
   const {
+    weekKey,
     items,
     customItems,
     checkedKeys,
@@ -109,6 +137,7 @@ export default function ShoppingListPage() {
   } = useShoppingList(weekIndex);
 
   const { pantryItems } = usePantryItems();
+  const { items: libraryItems } = useIngredientLibrary();
 
   const [groupBy, setGroupBy] = useState<GroupBy>("category");
   const [addRecipeOpen, setAddRecipeOpen] = useState(false);
@@ -117,13 +146,14 @@ export default function ShoppingListPage() {
   const [assigning, setAssigning] = useState<ShoppingItem | null>(null);
   const [editPantryOpen, setEditPantryOpen] = useState(false);
   const [pantryNewName, setPantryNewName] = useState("");
+  const [pantryAssigning, setPantryAssigning] = useState<LibraryIngredient | null>(null);
 
   const weekRange = useMemo(() => {
     if (!instance) return null;
-    const start = addDays(parseISO(instance.startDate), weekIndex * 7);
+    const start = addDays(calendarWeekMeta.firstMonday, weekIndex * 7);
     const end = addDays(start, 6);
     return { start, end };
-  }, [instance, weekIndex]);
+  }, [instance, weekIndex, calendarWeekMeta]);
 
   // Lookup map
   const locationMap = useMemo(
@@ -219,7 +249,7 @@ export default function ShoppingListPage() {
     if (item?.fromPantry && householdId) {
       await toggleSharedPantryCheckedKey(
         householdId,
-        weekIndex,
+        weekKey,
         key,
         sharedPantryCheckedByWeek
       );
@@ -242,7 +272,7 @@ export default function ShoppingListPage() {
     if (!user) return;
     await addRecipeToWeek(
       user.uid,
-      weekIndex,
+      weekKey,
       { recipeId, servingMultiplier: 1 },
       extraByWeek
     );
@@ -252,7 +282,7 @@ export default function ShoppingListPage() {
 
   async function handleRemoveExtra(entryId: string) {
     if (!user) return;
-    await removeExtraEntry(user.uid, weekIndex, entryId, extraByWeek);
+    await removeExtraEntry(user.uid, weekKey, entryId, extraByWeek);
   }
 
   async function handleAddCustom() {
@@ -309,7 +339,7 @@ export default function ShoppingListPage() {
       } else {
         await setOneOffMeta(
           user.uid,
-          weekIndex,
+          weekKey,
           item.key,
           {
             categoryId: next.categoryId,
@@ -336,7 +366,7 @@ export default function ShoppingListPage() {
       : [...pantryCheckedIds, libraryId];
     await setPantryCheckedForWeek(
       householdId,
-      weekIndex,
+      weekKey,
       next,
       pantryCheckedByWeek
     );
@@ -350,7 +380,7 @@ export default function ShoppingListPage() {
       .map((p) => p.id);
     await commitPantryForWeek(
       householdId,
-      weekIndex,
+      weekKey,
       toAdd,
       pantryAddedByWeek,
       pantryProcessedByWeek
@@ -364,7 +394,7 @@ export default function ShoppingListPage() {
 
   async function handleReopenPantry() {
     if (!householdId) return;
-    await reopenPantryForWeek(householdId, weekIndex, pantryProcessedByWeek);
+    await reopenPantryForWeek(householdId, weekKey, pantryProcessedByWeek);
   }
 
   async function handleRemoveFromPantry(libraryId: string) {
@@ -376,17 +406,81 @@ export default function ShoppingListPage() {
     );
   }
 
-  async function handleAddPantryItem() {
-    if (!user || !householdId || !pantryNewName.trim()) return;
-    // Create the library ingredient under the current user, then register it
-    // as a pantry item at the household level so both partners see it.
-    const newId = await createPantryLibraryIngredient(user.uid, pantryNewName.trim());
-    await addPantryItemId(
-      householdId,
-      pantryItems.map((p) => p.id),
-      newId
-    );
+  async function handleAddPantryItem(existing?: LibraryIngredient) {
+    if (!user || !householdId) return;
+    const name = pantryNewName.trim();
+    if (!existing && !name) return;
+
+    const pantryIdSet = new Set(pantryItems.map((p) => p.id));
+    // If an existing library match wasn't passed, look one up by name so typing
+    // a name that matches an ingredient already in recipes reuses it.
+    const match =
+      existing ??
+      libraryItems.find(
+        (i) => i.name.trim().toLowerCase() === name.toLowerCase()
+      );
+
+    if (match) {
+      if (pantryIdSet.has(match.id)) {
+        toast.info(`${match.name} is already in your pantry`);
+        setPantryNewName("");
+        return;
+      }
+      if (!match.isPantryItem) {
+        await updateLibraryIngredient(user.uid, match.id, {
+          isPantryItem: true,
+        });
+      }
+      await addPantryItemId(householdId, pantryItems.map((p) => p.id), match.id);
+      toast.success(`Added ${match.name} from your ingredient library`);
+      setPantryNewName("");
+      return;
+    }
+
+    const newId = await createPantryLibraryIngredient(user.uid, name);
+    await addPantryItemId(householdId, pantryItems.map((p) => p.id), newId);
     setPantryNewName("");
+  }
+
+  const pantryAssignItem = useMemo(() => {
+    if (!pantryAssigning) return null;
+    return {
+      key: pantryAssigning.id,
+      name: pantryAssigning.name,
+      isLinked: true,
+      categoryId: pantryAssigning.shoppingCategoryId ?? null,
+      locationId: pantryAssigning.shoppingLocationId ?? null,
+      sectionId: pantryAssigning.shoppingSectionId ?? null,
+      note: pantryAssigning.shoppingNote ?? null,
+      price: pantryAssigning.shoppingPrice ?? null,
+      libraryId: pantryAssigning.id,
+    };
+  }, [pantryAssigning]);
+
+  async function savePantryAssignment(
+    item: { libraryId: string },
+    next: {
+      categoryId: string | null;
+      locationId: string | null;
+      sectionId: string | null;
+      note: string | null;
+      price: number | null;
+    }
+  ) {
+    if (!user) return;
+    try {
+      await updateLibraryIngredient(user.uid, item.libraryId, {
+        shoppingCategoryId: next.categoryId,
+        shoppingLocationId: next.locationId,
+        shoppingSectionId: next.sectionId,
+        shoppingNote: next.note,
+        shoppingPrice: next.price,
+      });
+      toast.success("Updated");
+      setPantryAssigning(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    }
   }
 
   if (loading) {
@@ -584,7 +678,7 @@ export default function ShoppingListPage() {
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-muted-foreground">
                 {instance.templateName} · Week {weekIndex + 1}/
-                {instance.snapshot.length}
+                {calendarWeekMeta.totalWeeks}
               </p>
               <p className="text-sm font-semibold truncate">
                 {format(weekRange.start, "MMM d")} –{" "}
@@ -605,7 +699,7 @@ export default function ShoppingListPage() {
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                disabled={weekIndex >= instance.snapshot.length - 1}
+                disabled={weekIndex >= calendarWeekMeta.totalWeeks - 1}
                 onClick={() => setWeekIndex((i) => i + 1)}
               >
                 <ChevronRight className="h-4 w-4" />
@@ -1014,28 +1108,14 @@ export default function ShoppingListPage() {
             your shopping list each week so you can check what needs restocking.
           </p>
 
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleAddPantryItem();
-            }}
-          >
-            <Input
-              placeholder="Add pantry item (e.g. olive oil)…"
-              value={pantryNewName}
-              onChange={(e) => setPantryNewName(e.target.value)}
-            />
-            <Button
-              type="submit"
-              size="icon"
-              variant="outline"
-              className="shrink-0"
-              disabled={!pantryNewName.trim()}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </form>
+          <PantryAddCombobox
+            value={pantryNewName}
+            onChange={setPantryNewName}
+            libraryItems={libraryItems}
+            pantryIds={pantryItems.map((p) => p.id)}
+            onSubmitNew={() => handleAddPantryItem()}
+            onPickExisting={(lib) => handleAddPantryItem(lib)}
+          />
 
           <div className="max-h-72 overflow-y-auto -mx-1">
             {pantryItems.length === 0 ? (
@@ -1044,22 +1124,43 @@ export default function ShoppingListPage() {
               </p>
             ) : (
               <div className="divide-y">
-                {pantryItems.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center gap-3 px-2 py-2"
-                  >
-                    <span className="flex-1 text-sm">{p.name}</span>
-                    <button
-                      type="button"
-                      className="text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onClick={() => handleRemoveFromPantry(p.id)}
-                      title="Remove from pantry"
+                {pantryItems.map((p) => {
+                  const loc = p.shoppingLocationId
+                    ? locationMap.get(p.shoppingLocationId)
+                    : null;
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex items-center gap-2 px-2 py-2"
                     >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm truncate">{p.name}</div>
+                        {loc && (
+                          <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <MapPin className="h-2.5 w-2.5" />
+                            {loc.name}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="text-muted-foreground/60 hover:text-foreground transition-colors p-1"
+                        onClick={() => setPantryAssigning(p)}
+                        title="Assign store / category"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="text-muted-foreground/40 hover:text-destructive transition-colors p-1"
+                        onClick={() => handleRemoveFromPantry(p.id)}
+                        title="Remove from pantry"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1075,6 +1176,16 @@ export default function ShoppingListPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Pantry assign dialog */}
+      <AssignDialog
+        item={pantryAssignItem}
+        onClose={() => setPantryAssigning(null)}
+        onSave={savePantryAssignment}
+        locations={locations}
+        categories={categories}
+        locationMap={locationMap}
+      />
 
       {/* Assign dialog */}
       <AssignDialog
@@ -1148,7 +1259,18 @@ function ItemRow({
   );
 }
 
-function AssignDialog({
+type AssignDialogItem = {
+  key: string;
+  name: string;
+  isLinked: boolean;
+  categoryId: string | null;
+  locationId: string | null;
+  sectionId: string | null;
+  note: string | null;
+  price: number | null;
+};
+
+function AssignDialog<T extends AssignDialogItem>({
   item,
   onClose,
   onSave,
@@ -1156,10 +1278,10 @@ function AssignDialog({
   categories,
   locationMap,
 }: {
-  item: ShoppingItem | null;
+  item: T | null;
   onClose: () => void;
   onSave: (
-    item: ShoppingItem,
+    item: T,
     next: {
       categoryId: string | null;
       locationId: string | null;
@@ -1369,5 +1491,127 @@ function AssignDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PantryAddCombobox({
+  value,
+  onChange,
+  libraryItems,
+  pantryIds,
+  onSubmitNew,
+  onPickExisting,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  libraryItems: LibraryIngredient[];
+  pantryIds: string[];
+  onSubmitNew: () => void;
+  onPickExisting: (lib: LibraryIngredient) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const pantrySet = useMemo(() => new Set(pantryIds), [pantryIds]);
+  const trimmed = value.trim();
+  const lower = trimmed.toLowerCase();
+
+  const suggestions = useMemo(() => {
+    if (!trimmed) return [];
+    return libraryItems
+      .filter((i) => i.name.toLowerCase().includes(lower))
+      .sort((a, b) => {
+        const an = a.name.toLowerCase();
+        const bn = b.name.toLowerCase();
+        const ap = an.startsWith(lower) ? 0 : 1;
+        const bp = bn.startsWith(lower) ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 8);
+  }, [libraryItems, lower, trimmed]);
+
+  const exactMatch = suggestions.find(
+    (i) => i.name.trim().toLowerCase() === lower
+  );
+  const showCreate = trimmed && !exactMatch;
+  const hasPanel = focused && trimmed && (suggestions.length > 0 || showCreate);
+
+  return (
+    <div className="relative">
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!trimmed) return;
+          if (exactMatch) {
+            if (!pantrySet.has(exactMatch.id)) onPickExisting(exactMatch);
+            else onChange("");
+          } else {
+            onSubmitNew();
+          }
+        }}
+      >
+        <Input
+          placeholder="Add pantry item (e.g. olive oil)…"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 120)}
+        />
+        <Button
+          type="submit"
+          size="icon"
+          variant="outline"
+          className="shrink-0"
+          disabled={!trimmed}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </form>
+
+      {hasPanel && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border bg-popover shadow-md max-h-60 overflow-y-auto">
+          {suggestions.map((lib) => {
+            const already = pantrySet.has(lib.id);
+            return (
+              <button
+                key={lib.id}
+                type="button"
+                disabled={already}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (already) return;
+                  onPickExisting(lib);
+                }}
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center justify-between gap-2 ${
+                  already ? "opacity-60 cursor-not-allowed" : ""
+                }`}
+              >
+                <span className="truncate">{lib.name}</span>
+                <span className="text-[10px] text-muted-foreground shrink-0">
+                  {already
+                    ? "Already in pantry"
+                    : lib.isPantryItem
+                      ? "In library"
+                      : "In your ingredients"}
+                </span>
+              </button>
+            );
+          })}
+          {showCreate && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSubmitNew()}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors border-t flex items-center gap-2"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>
+                Create new pantry item: <strong>{trimmed}</strong>
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

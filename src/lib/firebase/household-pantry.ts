@@ -88,35 +88,34 @@ export async function removePantryItemId(
 
 export async function setPantryCheckedForWeek(
   householdId: string,
-  weekIndex: number,
+  weekKey: string,
   checkedIds: string[],
   currentMap: Record<string, string[]>
 ): Promise<void> {
-  const updated = { ...currentMap, [String(weekIndex)]: checkedIds };
+  const updated = { ...currentMap, [weekKey]: checkedIds };
   await patchPantryState(householdId, { pantryCheckedByWeek: updated });
 }
 
 export async function commitPantryForWeek(
   householdId: string,
-  weekIndex: number,
+  weekKey: string,
   addedIds: string[],
   currentAdded: Record<string, string[]>,
   currentProcessed: Record<string, boolean>
 ): Promise<void> {
-  const wk = String(weekIndex);
   await patchPantryState(householdId, {
-    pantryAddedByWeek: { ...currentAdded, [wk]: addedIds },
-    pantryProcessedByWeek: { ...currentProcessed, [wk]: true },
+    pantryAddedByWeek: { ...currentAdded, [weekKey]: addedIds },
+    pantryProcessedByWeek: { ...currentProcessed, [weekKey]: true },
   });
 }
 
 export async function reopenPantryForWeek(
   householdId: string,
-  weekIndex: number,
+  weekKey: string,
   currentProcessed: Record<string, boolean>
 ): Promise<void> {
   const updated = { ...currentProcessed };
-  delete updated[String(weekIndex)];
+  delete updated[weekKey];
   await patchPantryState(householdId, { pantryProcessedByWeek: updated });
 }
 
@@ -126,16 +125,54 @@ export async function reopenPantryForWeek(
  */
 export async function toggleSharedPantryCheckedKey(
   householdId: string,
-  weekIndex: number,
+  weekKey: string,
   key: string,
   currentMap: Record<string, string[]>
 ): Promise<void> {
-  const wk = String(weekIndex);
-  const existing = currentMap[wk] ?? [];
+  const existing = currentMap[weekKey] ?? [];
   const next = existing.includes(key)
     ? existing.filter((k) => k !== key)
     : [...existing, key];
   await patchPantryState(householdId, {
-    pantryCheckedKeysByWeek: { ...currentMap, [wk]: next },
+    pantryCheckedKeysByWeek: { ...currentMap, [weekKey]: next },
   });
+}
+
+/**
+ * Best-effort migration: rename a legacy numeric-offset key to its ISO-week key
+ * across the four pantry per-week records.
+ */
+export async function migratePantryWeekKey(
+  householdId: string,
+  legacyKey: string,
+  weekKey: string,
+  state: HouseholdPantryState
+): Promise<void> {
+  if (legacyKey === weekKey) return;
+
+  const patch: Partial<HouseholdPantryState> = {};
+  let dirty = false;
+
+  function migrate<T>(
+    field: Record<string, T> | undefined
+  ): Record<string, T> | null {
+    if (!field) return null;
+    if (!(legacyKey in field)) return null;
+    const next = { ...field };
+    if (!(weekKey in next)) next[weekKey] = next[legacyKey];
+    delete next[legacyKey];
+    return next;
+  }
+
+  const a = migrate(state.pantryAddedByWeek);
+  if (a) { patch.pantryAddedByWeek = a; dirty = true; }
+  const c = migrate(state.pantryCheckedByWeek);
+  if (c) { patch.pantryCheckedByWeek = c; dirty = true; }
+  const p = migrate(state.pantryProcessedByWeek);
+  if (p) { patch.pantryProcessedByWeek = p; dirty = true; }
+  const ck = migrate(state.pantryCheckedKeysByWeek);
+  if (ck) { patch.pantryCheckedKeysByWeek = ck; dirty = true; }
+
+  if (!dirty) return;
+  await patchPantryState(householdId, patch);
 }

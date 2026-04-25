@@ -8,6 +8,7 @@ import { ShoppingOrganizationManager } from "@/components/settings/shopping-orga
 import { HouseholdManager } from "@/components/settings/household-manager";
 import { MultiAccountManager } from "@/components/settings/multi-account-manager";
 import { UnitStandardsManager } from "@/components/settings/unit-standards-manager";
+import { MealPlanPreferences } from "@/components/settings/meal-plan-preferences";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -51,6 +52,8 @@ export default function SettingsPage() {
       <ShoppingOrganizationManager />
 
       <UnitStandardsManager />
+
+      <MealPlanPreferences />
     </div>
   );
 }

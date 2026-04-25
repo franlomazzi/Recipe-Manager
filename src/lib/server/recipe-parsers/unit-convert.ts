@@ -19,7 +19,7 @@ const MASS_TO_METRIC: Record<string, { factor: number; targetUnit: string }> = {
 // Round cleanly so we don't render "283.495 g flour". Resolution scales with
 // magnitude: tight at low masses where precision matters, coarse at high
 // masses where 5g either way doesn't change the recipe.
-function roundForDisplay(value: number): number {
+export function roundForDisplay(value: number): number {
   if (value >= 100) return Math.round(value / 5) * 5;
   if (value >= 10) return Math.round(value);
   return Math.round(value * 10) / 10;
@@ -27,7 +27,7 @@ function roundForDisplay(value: number): number {
 
 // Format the original quantity compactly for the audit note. Keeps integers
 // integer and trims trailing zeros from decimals.
-function formatOriginal(q: number): string {
+export function formatOriginal(q: number): string {
   return q % 1 === 0 ? String(q) : q.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 

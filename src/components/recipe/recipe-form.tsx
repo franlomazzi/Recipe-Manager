@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import { generateRecipeImage } from "@/lib/services/gemini-service";
 import { mapStepIngredientsWithAI } from "@/lib/services/step-ingredient-mapper-service";
+import { getOrFetchConversion, applyConversion } from "@/lib/ingredients/unit-conversion";
 import { toast } from "sonner";
 import type { Recipe, Ingredient, Step, StepIngredient, Difficulty, CookLog, LibraryIngredient } from "@/lib/types/recipe";
 import { RECIPE_CATEGORIES, CUISINE_TAGS, DIET_TAGS } from "@/lib/types/recipe";
@@ -730,8 +731,13 @@ export function RecipeForm({
     });
   }
 
-  function selectLibraryIngredient(index: number, item: LibraryIngredient) {
+  async function selectLibraryIngredient(index: number, item: LibraryIngredient) {
     const oldId = ingredients[index]?.id;
+    // Capture pre-link unit/quantity for AI conversion below.
+    const preLinkUnit = ingredients[index]?.unit;
+    const preLinkQty = ingredients[index]?.quantity;
+    const preLinkNote = ingredients[index]?.note ?? "";
+
     setIngredients((prev) => {
       const updated = [...prev];
       // Adopt the library's reference unit on link. Scaling is only coherent
@@ -795,6 +801,35 @@ export function RecipeForm({
           ),
         }))
       );
+    }
+
+    // If the pre-link unit differs from the library's canonical unit, use AI
+    // to convert the quantity. This handles e.g. "0.25 tsp" linked to a
+    // library item tracked in grams.
+    if (user && preLinkUnit && preLinkUnit !== item.servingUnit && preLinkQty != null) {
+      const conversion = await getOrFetchConversion(user.uid, item, preLinkUnit);
+      if (conversion) {
+        setIngredients((prev) => {
+          const idx = prev.findIndex((i) => i.id === item.id);
+          if (idx === -1) return prev;
+          const updated = [...prev];
+          const ing = updated[idx];
+          // Apply conversion to the original (pre-link) quantity and unit so
+          // the result is correct in the canonical unit.
+          const converted = applyConversion(
+            { ...ing, quantity: preLinkQty, unit: preLinkUnit, note: preLinkNote },
+            conversion
+          );
+          const scaled = ing.reference ? scaleFromReference(ing.reference, converted.quantity) : {};
+          updated[idx] = { ...ing, ...converted, ...scaled };
+          return updated;
+        });
+      } else {
+        toast.warning(
+          `Couldn't auto-convert ${item.name} from ${preLinkUnit} to ${item.servingUnit} — review manually.`,
+          { duration: 5000 }
+        );
+      }
     }
   }
 
@@ -1050,12 +1085,12 @@ export function RecipeForm({
       return;
     }
 
-    const validIngredients = ingredients.filter((i) => i.name.trim());
+    const rawIngredients = ingredients.filter((i) => i.name.trim());
     const validSteps = steps
       .filter((s) => s.instruction.trim())
       .map((s, i) => ({ ...s, order: i + 1 }));
 
-    if (validIngredients.length === 0) {
+    if (rawIngredients.length === 0) {
       toast.error("Please add at least one ingredient");
       return;
     }
@@ -1071,6 +1106,22 @@ export function RecipeForm({
       );
       return;
     }
+
+    // Fix any legacy linked ingredients where the recipe's unit still differs
+    // from the library's canonical unit (e.g. saved before this feature).
+    const libraryMap = new Map(libraryItems.map((li) => [li.id, li]));
+    const validIngredients = await Promise.all(
+      rawIngredients.map(async (ing) => {
+        if (!ing.reference || ing.unit === ing.reference.unit) return ing;
+        const libItem = libraryMap.get(ing.id);
+        if (!libItem) return ing;
+        const conversion = await getOrFetchConversion(user.uid, libItem, ing.unit);
+        if (!conversion) return ing;
+        const converted = applyConversion(ing, conversion);
+        const scaled = scaleFromReference(ing.reference, converted.quantity);
+        return { ...converted, ...scaled };
+      })
+    );
 
     const prep = parseInt(prepTime) || 0;
     const cook = parseInt(cookTime) || 0;

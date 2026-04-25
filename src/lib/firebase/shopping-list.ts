@@ -50,14 +50,13 @@ export async function toggleCheckedKey(
 /** Add a recipe entry to a specific week (allows duplicates — use servingMultiplier to scale) */
 export async function addRecipeToWeek(
   userId: string,
-  weekIndex: number,
+  weekKey: string,
   entry: Omit<ExtraRecipeEntry, "id">,
   currentByWeek: Record<string, ExtraRecipeEntry[]>
 ) {
-  const key = String(weekIndex);
-  const existing = currentByWeek[key] ?? [];
+  const existing = currentByWeek[weekKey] ?? [];
   const newEntry: ExtraRecipeEntry = { ...entry, id: crypto.randomUUID() };
-  const updated = { ...currentByWeek, [key]: [...existing, newEntry] };
+  const updated = { ...currentByWeek, [weekKey]: [...existing, newEntry] };
   await setDoc(
     docRef(userId),
     { ...baseFields(userId), extraByWeek: updated },
@@ -68,14 +67,13 @@ export async function addRecipeToWeek(
 /** Remove a single extra entry by its id from a specific week */
 export async function removeExtraEntry(
   userId: string,
-  weekIndex: number,
+  weekKey: string,
   entryId: string,
   currentByWeek: Record<string, ExtraRecipeEntry[]>
 ) {
-  const key = String(weekIndex);
   const updated = {
     ...currentByWeek,
-    [key]: (currentByWeek[key] ?? []).filter((e) => e.id !== entryId),
+    [weekKey]: (currentByWeek[weekKey] ?? []).filter((e) => e.id !== entryId),
   };
   await setDoc(
     docRef(userId),
@@ -101,13 +99,12 @@ export async function updateCustomItems(
  */
 export async function setOneOffMeta(
   userId: string,
-  weekIndex: number,
+  weekKey: string,
   itemKey: string,
   meta: OneOffMeta,
   currentByWeek: Record<string, Record<string, OneOffMeta>>
 ) {
-  const wk = String(weekIndex);
-  const weekMap = { ...(currentByWeek[wk] ?? {}) };
+  const weekMap = { ...(currentByWeek[weekKey] ?? {}) };
 
   // Strip undefined values — Firestore rejects them
   const cleaned: OneOffMeta = {};
@@ -121,12 +118,48 @@ export async function setOneOffMeta(
     weekMap[itemKey] = cleaned;
   }
 
-  const updated = { ...currentByWeek, [wk]: weekMap };
+  const updated = { ...currentByWeek, [weekKey]: weekMap };
   await setDoc(
     docRef(userId),
     { ...baseFields(userId), oneOffByWeek: updated },
     { merge: true }
   );
+}
+
+/**
+ * Best-effort migration: copy a legacy numeric-offset key to its ISO-week key
+ * across all per-week records on the shopping list doc, then delete the legacy
+ * entry. Safe to call multiple times (no-op if nothing to migrate).
+ */
+export async function migrateWeekKey(
+  userId: string,
+  legacyKey: string,
+  weekKey: string,
+  state: ShoppingListState
+) {
+  if (legacyKey === weekKey) return;
+
+  const patch: Partial<ShoppingListState> = {};
+  let dirty = false;
+
+  function migrate<T>(field: Record<string, T> | undefined): Record<string, T> | null {
+    if (!field) return null;
+    if (!(legacyKey in field)) return null;
+    const next = { ...field };
+    if (!(weekKey in next)) {
+      next[weekKey] = next[legacyKey];
+    }
+    delete next[legacyKey];
+    return next;
+  }
+
+  const extra = migrate(state.extraByWeek);
+  if (extra) { patch.extraByWeek = extra; dirty = true; }
+  const oneOff = migrate(state.oneOffByWeek);
+  if (oneOff) { patch.oneOffByWeek = oneOff; dirty = true; }
+
+  if (!dirty) return;
+  await setDoc(docRef(userId), { ...baseFields(userId), ...patch }, { merge: true });
 }
 
 export async function clearAllChecked(userId: string) {

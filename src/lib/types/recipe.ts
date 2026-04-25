@@ -208,6 +208,13 @@ export interface LibraryIngredient {
   shoppingPrice?: number | null;
   /** Whether this ingredient is part of the user's recurring pantry checklist */
   isPantryItem?: boolean;
+  /**
+   * AI-derived conversion factors from non-canonical units to `servingUnit`.
+   * Keyed by source unit (e.g. "tsp"). factor × source quantity = target quantity.
+   * Populated on first encounter and reused; `targetUnit` is stored explicitly
+   * for robustness if `servingUnit` ever changes.
+   */
+  unitConversions?: Record<string, { factor: number; targetUnit: string }>;
 }
 
 export const RECIPE_CATEGORIES = [

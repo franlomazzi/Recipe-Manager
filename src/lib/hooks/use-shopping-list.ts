@@ -6,8 +6,15 @@ import { useRecipes } from "./use-recipes";
 import { useActivePlan } from "./use-active-plan";
 import { useIngredientLibrary } from "./use-ingredient-library";
 import { useHouseholdPantryState } from "./use-household-pantry-state";
-import { subscribeToShoppingListState } from "@/lib/firebase/shopping-list";
+import {
+  subscribeToShoppingListState,
+  migrateWeekKey,
+} from "@/lib/firebase/shopping-list";
+import { migratePantryWeekKey } from "@/lib/firebase/household-pantry";
+import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { normalizeUnit } from "@/lib/unit-standards";
+import { isoWeekKey, isoWeekKeyForOffset, legacyWeekKey } from "@/lib/utils/week-keys";
+import { addDays, parseISO, startOfWeek } from "date-fns";
 import type { Recipe, IngredientCategory, LibraryIngredient } from "@/lib/types/recipe";
 import type {
   ShoppingItem,
@@ -24,15 +31,24 @@ function itemKey(name: string, unit: string): string {
   return `${name.trim().toLowerCase()}|${normalizeUnit(unit)}`;
 }
 
-/** Count how many times each recipe appears in a single week (plan occurrences) */
-function recipeOccurrencesForWeek(
+/**
+ * Count recipe occurrences for a calendar week (Mon–Sun).
+ * weekOffset=0 is the Monday of the week containing planStart.
+ * Days outside the plan range are skipped.
+ */
+function recipeOccurrencesForCalendarWeek(
   instance: PlanInstance,
-  weekIndex: number
+  weekOffset: number
 ): Map<string, number> {
   const counts = new Map<string, number>();
-  const week = instance.snapshot[weekIndex];
-  if (!week) return counts;
-  for (const day of week.days) {
+  const planStart = parseISO(instance.startDate);
+  const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(firstMonday, weekOffset * 7 + i);
+    const indices = getIndicesForDate(instance, date);
+    if (!indices) continue;
+    const day = instance.snapshot[indices.weekIndex]?.days[indices.dayIndex];
+    if (!day) continue;
     for (const meal of day.meals) {
       counts.set(meal.mealId, (counts.get(meal.mealId) ?? 0) + 1);
     }
@@ -211,9 +227,17 @@ export function useShoppingList(weekIndex: number = 0) {
   const { recipes } = useRecipes();
   const { instance } = useActivePlan();
   const { items: libraryItems } = useIngredientLibrary();
-  const { state: pantryState } = useHouseholdPantryState();
+  const { state: pantryState, householdId } = useHouseholdPantryState();
   const [state, setState] = useState<ShoppingListState | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // ISO-week key for the selected week. Stable across plan edits/replacements.
+  // Falls back to today's ISO week when there's no active plan.
+  const weekKey = useMemo(() => {
+    if (instance) return isoWeekKeyForOffset(instance.startDate, weekIndex);
+    return isoWeekKey(new Date());
+  }, [instance, weekIndex]);
+  const legacyKey = legacyWeekKey(weekIndex);
 
   useEffect(() => {
     if (!user) {
@@ -242,7 +266,7 @@ export function useShoppingList(weekIndex: number = 0) {
   const planOccurrences = useMemo(
     () =>
       instance
-        ? recipeOccurrencesForWeek(instance, weekIndex)
+        ? recipeOccurrencesForCalendarWeek(instance, weekIndex)
         : new Map<string, number>(),
     [instance, weekIndex]
   );
@@ -255,13 +279,13 @@ export function useShoppingList(weekIndex: number = 0) {
   );
 
   const oneOffForWeek = useMemo(
-    () => oneOffByWeek[String(weekIndex)] ?? {},
-    [oneOffByWeek, weekIndex]
+    () => oneOffByWeek[weekKey] ?? oneOffByWeek[legacyKey] ?? {},
+    [oneOffByWeek, weekKey, legacyKey]
   );
 
   const extraEntries: ExtraRecipeEntry[] = useMemo(
-    () => extraByWeek[String(weekIndex)] ?? [],
-    [extraByWeek, weekIndex]
+    () => extraByWeek[weekKey] ?? extraByWeek[legacyKey] ?? [],
+    [extraByWeek, weekKey, legacyKey]
   );
 
   const checkedKeys = useMemo(
@@ -274,22 +298,51 @@ export function useShoppingList(weekIndex: number = 0) {
   const pantryCheckedByWeek = pantryState.pantryCheckedByWeek;
   const pantryProcessedByWeek = pantryState.pantryProcessedByWeek;
   const pantryAddedIds = useMemo(
-    () => pantryAddedByWeek[String(weekIndex)] ?? [],
-    [pantryAddedByWeek, weekIndex]
+    () => pantryAddedByWeek[weekKey] ?? pantryAddedByWeek[legacyKey] ?? [],
+    [pantryAddedByWeek, weekKey, legacyKey]
   );
   const pantryCheckedIds = useMemo(
-    () => pantryCheckedByWeek[String(weekIndex)] ?? [],
-    [pantryCheckedByWeek, weekIndex]
+    () => pantryCheckedByWeek[weekKey] ?? pantryCheckedByWeek[legacyKey] ?? [],
+    [pantryCheckedByWeek, weekKey, legacyKey]
   );
-  const pantryProcessed = !!pantryProcessedByWeek[String(weekIndex)];
+  const pantryProcessed =
+    !!(pantryProcessedByWeek[weekKey] ?? pantryProcessedByWeek[legacyKey]);
 
   const sharedPantryCheckedKeys = useMemo(
     () =>
       new Set(
-        pantryState.pantryCheckedKeysByWeek[String(weekIndex)] ?? []
+        pantryState.pantryCheckedKeysByWeek[weekKey] ??
+          pantryState.pantryCheckedKeysByWeek[legacyKey] ??
+          []
       ),
-    [pantryState, weekIndex]
+    [pantryState, weekKey, legacyKey]
   );
+
+  // Best-effort one-time migration: if legacy numeric-offset data exists for
+  // this week, copy it to the new ISO-week key and delete the legacy entry.
+  useEffect(() => {
+    if (!user || !state) return;
+    if (legacyKey === weekKey) return;
+    const hasLegacy =
+      legacyKey in (state.extraByWeek ?? {}) ||
+      legacyKey in (state.oneOffByWeek ?? {});
+    if (hasLegacy) {
+      void migrateWeekKey(user.uid, legacyKey, weekKey, state);
+    }
+  }, [user, state, legacyKey, weekKey]);
+
+  useEffect(() => {
+    if (!householdId) return;
+    if (legacyKey === weekKey) return;
+    const hasLegacy =
+      legacyKey in (pantryState.pantryAddedByWeek ?? {}) ||
+      legacyKey in (pantryState.pantryCheckedByWeek ?? {}) ||
+      legacyKey in (pantryState.pantryProcessedByWeek ?? {}) ||
+      legacyKey in (pantryState.pantryCheckedKeysByWeek ?? {});
+    if (hasLegacy) {
+      void migratePantryWeekKey(householdId, legacyKey, weekKey, pantryState);
+    }
+  }, [householdId, pantryState, legacyKey, weekKey]);
 
   const items = useMemo(
     () =>
@@ -342,6 +395,7 @@ export function useShoppingList(weekIndex: number = 0) {
   );
 
   return {
+    weekKey,
     items,
     customItems,
     checkedKeys: state?.checkedKeys ?? [],
