@@ -1,6 +1,7 @@
 import {
   doc,
   setDoc,
+  updateDoc,
   onSnapshot,
   serverTimestamp,
   type Unsubscribe,
@@ -172,14 +173,24 @@ export async function updateLibraryIngredient(
   }
 ): Promise<void> {
   const ref = doc(getDb(), ING_COL, `${userId}_${ingredientId}`);
-  const data: Record<string, unknown> = {
-    userId,
-    lastUsed: serverTimestamp(),
-  };
+  // Only the fields being updated — updateDoc sends a field-mask patch so the
+  // server applies the delta without reading the full document first (unlike
+  // setDoc with merge, which is a server-side read-then-write).
+  const data: Record<string, unknown> = { lastUsed: serverTimestamp() };
   for (const [key, val] of Object.entries(fields)) {
     if (val !== undefined) data[key] = val;
   }
-  await setDoc(ref, data, { merge: true });
+  try {
+    await updateDoc(ref, data);
+  } catch (err: unknown) {
+    // Document doesn't exist yet — e.g. first time assigning shopping metadata
+    // to a partner's pantry ingredient under the current user's id.
+    if ((err as { code?: string }).code === "not-found") {
+      await setDoc(ref, { userId, ...data }, { merge: true });
+    } else {
+      throw err;
+    }
+  }
 }
 
 /**

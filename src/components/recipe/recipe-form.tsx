@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/contexts/auth-context";
 import {
@@ -58,9 +58,9 @@ import { toast } from "sonner";
 import type { Recipe, Ingredient, Step, StepIngredient, Difficulty, CookLog, LibraryIngredient } from "@/lib/types/recipe";
 import { RECIPE_CATEGORIES, CUISINE_TAGS, DIET_TAGS } from "@/lib/types/recipe";
 import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
+import { findLibraryMatches } from "@/lib/utils/ingredient-match";
 import { saveIngredientToLibrary } from "@/lib/firebase/ingredient-library";
 import { IngredientCombobox } from "@/components/recipe/ingredient-combobox";
-import { findLibraryMatches } from "@/lib/utils/ingredient-match";
 import { CheckCircle2, Package, Pencil } from "lucide-react";
 import {
   DndContext,
@@ -608,7 +608,7 @@ export function RecipeForm({
   // reuse all the pre-fill logic below — but it must still save as a new
   // recipe. Key off the id, not presence of the object.
   const isEditing = !!recipe?.id;
-  const { items: libraryItems } = useIngredientLibrary();
+  const { items: libraryItems, loading: libraryLoading } = useIngredientLibrary();
 
   const [title, setTitle] = useState(recipe?.title || "");
   const [description, setDescription] = useState(recipe?.description || "");
@@ -675,6 +675,27 @@ export function RecipeForm({
     return out;
   });
   const [convertingUnitForId, setConvertingUnitForId] = useState<string | null>(null);
+
+  // Auto-link imported ingredients with exact library name matches the first
+  // time the library finishes loading. Prevents common condiments (salt,
+  // pepper, oil, etc.) from being saved as duplicates when the user doesn't
+  // notice or manually click the match suggestion.
+  const autoLinkedRef = useRef(false);
+  useEffect(() => {
+    if (!needsIngredientReview || libraryLoading || libraryItems.length === 0 || autoLinkedRef.current) return;
+    autoLinkedRef.current = true;
+    ingredients.forEach((ing, index) => {
+      if (reviewStatus[ing.id]?.type !== "pending") return;
+      const matches = findLibraryMatches(ing.name, libraryItems, 1);
+      if (matches[0]?.score === 1) {
+        void selectLibraryIngredient(index, matches[0].item);
+      }
+    });
+  // ingredients/reviewStatus intentionally omitted: autoLinkedRef guards
+  // single execution, so we capture their initial state on first library load.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryItems, libraryLoading, needsIngredientReview]);
+
   const pendingReviewCount = Object.values(reviewStatus).filter(
     (s) => s.type === "pending"
   ).length;

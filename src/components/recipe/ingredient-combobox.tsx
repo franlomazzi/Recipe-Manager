@@ -83,6 +83,14 @@ export function IngredientCombobox({
     }
   }
 
+  function handleBlur() {
+    if (!search.trim()) return;
+    const exact = libraryItems.find(
+      (item) => item.name.toLowerCase() === search.trim().toLowerCase()
+    );
+    if (exact) handleSelect(exact);
+  }
+
   // Close when clicking outside both the input wrapper and the portal dropdown.
   useEffect(() => {
     if (!showDropdown) return;
@@ -127,6 +135,7 @@ export function IngredientCombobox({
           value={search}
           onChange={(e) => handleInputChange(e.target.value)}
           onFocus={handleFocus}
+          onBlur={handleBlur}
           className="pl-7"
         />
       </div>

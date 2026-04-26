@@ -84,8 +84,15 @@ export async function startPlanInstance(
   startWeekIndex: number = 0
 ): Promise<string> {
   const db = getDb();
-  // Slice weeks from the chosen starting week
-  const remainingWeeks = template.weeks.slice(startWeekIndex);
+  // Slice weeks from the chosen starting week, stripping mealPhoto URLs.
+  // Photo URLs can be 200+ bytes each and make the snapshot document very large
+  // (100–200 KB for multi-week plans), causing slow Firestore writes. The weekly
+  // view uses mealId to identify meals; photos are fetched from nutrition_meals.
+  const remainingWeeks = template.weeks.slice(startWeekIndex).map((week) => ({
+    days: week.days.map((day) => ({
+      meals: day.meals.map(({ mealPhoto: _unused, ...meal }) => meal),
+    })),
+  }));
   const startDate = parseISO(startDateStr);
   const startDayOfWeek = (startDate.getDay() + 6) % 7; // 0=Mon..6=Sun
   const startMonday = addDays(startDate, -startDayOfWeek);
