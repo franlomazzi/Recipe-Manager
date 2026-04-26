@@ -14,6 +14,7 @@ import {
   ArrowRight,
   ChevronLeft,
   Clock,
+  Loader2,
   X,
   ChefHat,
   Minus,
@@ -23,6 +24,7 @@ import {
   Check,
 } from "lucide-react";
 import { ImprovementSuggestions } from "@/components/recipe/improvement-suggestions";
+import { fetchScaledInstructions } from "@/lib/cooking/fetch-scaled-instructions";
 import type { Recipe, CookLog } from "@/lib/types/recipe";
 
 interface CookingModeViewProps {
@@ -41,6 +43,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [servingsLocked, setServingsLocked] = useState(false);
+  const [localScaledInstructions, setLocalScaledInstructions] = useState<Record<string, string> | null>(null);
   const [stepNotes, setStepNotes] = useState<Record<number, string>>({});
   const [activeNoteStep, setActiveNoteStep] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,6 +66,19 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
       setServingsLocked(true);
     }
   }, [currentStep]);
+
+  // Fire step-instruction scaling when servings are locked in at a non-1x multiplier
+  useEffect(() => {
+    if (!servingsLocked || servingMultiplier === 1 || recipe.steps.length === 0) return;
+    fetchScaledInstructions(
+      recipe.steps,
+      servingMultiplier,
+      user,
+      recipe.id,
+      (_id, map) => setLocalScaledInstructions(map)
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [servingsLocked]);
 
   useEffect(() => {
     requestWakeLock();
@@ -249,17 +265,20 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
                   Now
                 </div>
                 <p className="kt-serif text-2xl font-medium leading-[1.25] md:text-3xl">
-                  {step.instruction}
+                  {localScaledInstructions?.[step.id] ?? step.instruction}
                 </p>
               </div>
             </div>
           ) : (
             <div className="max-w-2xl text-center">
-              <div className="kt-mono mb-5 text-[11px] uppercase tracking-[0.25em] text-primary">
+              <div className="kt-mono mb-5 flex items-center justify-center gap-2 text-[11px] uppercase tracking-[0.25em] text-primary">
                 Now
+                {servingMultiplier !== 1 && !localScaledInstructions && (
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                )}
               </div>
               <p className="kt-serif text-4xl font-medium leading-[1.15] md:text-6xl tracking-tight">
-                {step.instruction}
+                {localScaledInstructions?.[step.id] ?? step.instruction}
               </p>
             </div>
           )}
@@ -338,7 +357,7 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
                 Next &middot; {String(currentStep + 2).padStart(2, "0")}
               </div>
               <p className="kt-serif flex-1 truncate text-sm text-muted-foreground">
-                {nextStep.instruction}
+                {localScaledInstructions?.[nextStep.id] ?? nextStep.instruction}
               </p>
             </div>
           )}
@@ -497,11 +516,16 @@ export function CookingModeView({ recipe, cookLogs = [] }: CookingModeViewProps)
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-8 md:px-12 lg:px-16">
         {/* Step instruction */}
         <div className="max-w-2xl lg:max-w-3xl text-center">
-          <div className="mb-6 inline-flex h-14 w-14 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-primary text-2xl md:text-3xl font-bold text-primary-foreground shadow-lg">
+          <div className="relative mb-6 inline-flex h-14 w-14 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-primary text-2xl md:text-3xl font-bold text-primary-foreground shadow-lg">
             {currentStep + 1}
+            {servingMultiplier !== 1 && !localScaledInstructions && (
+              <span className="absolute -top-1.5 -right-1.5">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </span>
+            )}
           </div>
           <p className="text-2xl font-medium leading-relaxed md:text-3xl lg:text-4xl">
-            {step.instruction}
+            {localScaledInstructions?.[step.id] ?? step.instruction}
           </p>
         </div>
 

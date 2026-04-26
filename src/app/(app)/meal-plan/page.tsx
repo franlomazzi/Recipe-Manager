@@ -1,47 +1,41 @@
 "use client";
 
 import { useState } from "react";
+import { addDays, format, parseISO } from "date-fns";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { usePlanTemplates } from "@/lib/hooks/use-plan-templates";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
+import { useAdhocWeek } from "@/lib/hooks/use-adhoc-week";
 import {
   deleteTemplate,
   endInstanceEarly,
+  currentWeekMonday,
 } from "@/lib/firebase/meal-plans";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  CalendarDays,
   Plus,
   Play,
   Pencil,
   Trash2,
   Loader2,
   LayoutTemplate,
-  Square,
-  MoreVertical,
   ArrowLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { WeeklyView } from "@/components/meal-plan/weekly-view";
 import { TemplateEditor } from "@/components/meal-plan/template-editor";
 import { StartPlanDialog } from "@/components/meal-plan/start-plan-dialog";
-import type { PlanTemplate } from "@/lib/types/meal-plan";
+import type { PlanInstance, PlanTemplate } from "@/lib/types/meal-plan";
 
 export default function MealPlanPage() {
   const { user } = useAuth();
   const isKT = useKitchenTool();
   const { templates, loading: templatesLoading } = usePlanTemplates();
   const { instance, loading: planLoading } = useActivePlan();
+  const { adhocInstance, ensureAdhocInstance } = useAdhocWeek();
 
   const [showTemplates, setShowTemplates] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -102,27 +96,25 @@ export default function MealPlanPage() {
   }
 
   // ─── KT Templates view ───
-  if (isKT && (showTemplates || !instance)) {
+  if (isKT && showTemplates) {
     return (
       <div className="kt-meal-plan mx-auto max-w-5xl px-5 py-6 md:px-8 md:py-10">
         <div className="flex items-center justify-between border-b border-[var(--border)] pb-5">
           <div>
             <div className="kt-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-              {instance ? "Library" : "Kitchen"} &middot; Plans
+              Library &middot; Plans
             </div>
             <h1 className="kt-serif mt-1 text-3xl font-medium md:text-4xl">
-              {instance ? "Templates" : "Meal Plan"}
+              Templates
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            {instance && (
-              <button
-                onClick={() => setShowTemplates(false)}
-                className="kt-mono flex items-center gap-1.5 border border-[var(--border)] px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft className="h-3 w-3" /> Back
-              </button>
-            )}
+            <button
+              onClick={() => setShowTemplates(false)}
+              className="kt-mono flex items-center gap-1.5 border border-[var(--border)] px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="h-3 w-3" /> Back
+            </button>
             <button
               onClick={handleCreateTemplate}
               className="kt-mono flex items-center gap-1.5 bg-primary px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-primary-foreground"
@@ -131,12 +123,6 @@ export default function MealPlanPage() {
             </button>
           </div>
         </div>
-
-        {!instance && (
-          <p className="kt-serif mt-6 max-w-xl text-base italic text-muted-foreground">
-            Create a template, then start a plan to see your weekly menu laid out as a ledger.
-          </p>
-        )}
 
         {templates.length === 0 ? (
           <div className="mt-8 border border-dashed border-[var(--border)] px-6 py-16 text-center">
@@ -220,38 +206,20 @@ export default function MealPlanPage() {
   }
 
   // ─── Templates view ───
-  if (showTemplates || !instance) {
+  if (showTemplates) {
     return (
       <div className="p-4 md:p-6 space-y-4">
         <div className="flex items-center gap-3">
-          {instance && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => setShowTemplates(false)}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          )}
-          <h1 className="text-2xl font-bold tracking-tight">
-            {instance ? "Templates" : "Meal Plan"}
-          </h1>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setShowTemplates(false)}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-2xl font-bold tracking-tight">Templates</h1>
         </div>
-
-        {!instance && (
-          <Card>
-            <CardContent className="py-8 text-center space-y-3">
-              <CalendarDays className="h-10 w-10 mx-auto text-muted-foreground/50" />
-              <div>
-                <p className="font-medium">No active plan</p>
-                <p className="text-sm text-muted-foreground">
-                  Create a template and start a plan to see your weekly menu.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
@@ -350,6 +318,46 @@ export default function MealPlanPage() {
             template={startingTemplate}
           />
         )}
+      </div>
+    );
+  }
+
+  // ─── Ad-hoc week view (no active plan) ───
+  if (!instance) {
+    const monday = currentWeekMonday();
+    const adhocShell: PlanInstance = adhocInstance ?? {
+      id: "",
+      userId: user!.uid,
+      templateId: "",
+      templateName: "Ad-hoc Week",
+      snapshot: [{ days: Array.from({ length: 7 }, () => ({ meals: [] })) }],
+      startDate: monday,
+      endDate: format(addDays(parseISO(monday), 6), "yyyy-MM-dd"),
+      status: "adhoc",
+    };
+    return (
+      <div className={`flex h-full flex-col p-2 md:p-3${isKT ? " kt-meal-plan" : ""}`}>
+        <div className="flex items-center justify-between px-1 pb-1 shrink-0">
+          <span className="text-xs text-muted-foreground">No active plan</span>
+          <button
+            onClick={() => setShowTemplates(true)}
+            className="text-xs text-primary hover:underline"
+          >
+            Templates →
+          </button>
+        </div>
+        <WeeklyView
+          instance={adhocShell}
+          onShowTemplates={() => setShowTemplates(true)}
+          onEndPlan={() => {}}
+          endingPlan={false}
+          onEnsureInstance={ensureAdhocInstance}
+        />
+        <TemplateEditor
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          template={editingTemplate}
+        />
       </div>
     );
   }

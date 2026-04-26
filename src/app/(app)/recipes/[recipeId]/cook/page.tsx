@@ -5,6 +5,8 @@ import { useEffect, useRef } from "react";
 import { useRecipe } from "@/lib/hooks/use-recipe";
 import { getCookLogs } from "@/lib/firebase/firestore";
 import { useCookingSession } from "@/lib/contexts/cooking-session-context";
+import { useAuth } from "@/lib/contexts/auth-context";
+import { fetchScaledInstructions } from "@/lib/cooking/fetch-scaled-instructions";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -15,7 +17,8 @@ export default function CookPage() {
   const searchParams = useSearchParams();
   const recipeId = params.recipeId as string;
   const { recipe, loading } = useRecipe(recipeId);
-  const { sessions, addSession, setActiveSession } = useCookingSession();
+  const { sessions, addSession, setActiveSession, setScaledInstructions } = useCookingSession();
+  const { user } = useAuth();
   const hasHandled = useRef(false);
 
   useEffect(() => {
@@ -37,9 +40,12 @@ export default function CookPage() {
     getCookLogs(recipe.id).then((cookLogs) => {
       addSession(recipe, cookLogs, servingMultiplier);
       setActiveSession(recipe.id);
+      if (servingMultiplier !== 1 && recipe.steps.length > 0) {
+        fetchScaledInstructions(recipe.steps, servingMultiplier, user, recipe.id, setScaledInstructions);
+      }
       router.replace("/cook");
     });
-  }, [recipe, sessions, addSession, setActiveSession, router, searchParams]);
+  }, [recipe, sessions, addSession, setActiveSession, setScaledInstructions, user, router, searchParams]);
 
   if (loading || !recipe) {
     return (

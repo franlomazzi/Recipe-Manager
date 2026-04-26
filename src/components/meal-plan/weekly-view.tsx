@@ -52,6 +52,7 @@ interface WeeklyViewProps {
   onShowTemplates: () => void;
   onEndPlan: () => void;
   endingPlan: boolean;
+  onEnsureInstance?: () => Promise<PlanInstance>;
 }
 
 const CATEGORY_EMOJI: Record<string, string> = {
@@ -66,7 +67,9 @@ export function WeeklyView({
   onShowTemplates,
   onEndPlan,
   endingPlan,
+  onEnsureInstance,
 }: WeeklyViewProps) {
+  const isAdhoc = instance.status === "adhoc";
   const router = useRouter();
   const { recipes } = useRecipes();
 
@@ -199,10 +202,17 @@ export function WeeklyView({
     const { weekIndex, dayIndex } = indices;
     const day = instance.snapshot[weekIndex]?.days[dayIndex];
     if (!day) return;
+
+    let instanceId = instance.id;
+    if (!instanceId && onEnsureInstance) {
+      const real = await onEnsureInstance();
+      instanceId = real.id;
+    }
+
     const updatedDay: PlanDay = {
       meals: [...day.meals.filter((m) => m.category !== pickerTarget.category), meal],
     };
-    await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
+    await updateInstanceDay(instanceId, weekIndex, dayIndex, updatedDay);
   }
 
   async function removeMeal(colIdx: number, category: string) {
@@ -234,39 +244,45 @@ export function WeeklyView({
         <div className="flex items-center gap-2 mb-2 shrink-0">
           <div className="min-w-0 flex-1">
             <h2 className="text-sm md:text-base font-semibold truncate">
-              {instance.templateName}
+              {isAdhoc ? "This week" : instance.templateName}
             </h2>
           </div>
 
           {/* Week nav */}
           <div className="flex items-center gap-1 shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              disabled={weekOffset === 0}
-              onClick={() => {
-                setWeekOffset((i) => i - 1);
-                setSelectedDay(0);
-              }}
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </Button>
-            <span className="text-xs font-medium min-w-[56px] text-center text-muted-foreground">
-              {weekOffset + 1}/{totalWeeks}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              disabled={weekOffset >= totalWeeks - 1}
-              onClick={() => {
-                setWeekOffset((i) => i + 1);
-                setSelectedDay(0);
-              }}
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
+            {isAdhoc ? (
+              <span className="text-xs text-muted-foreground">Resets Mon</span>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={weekOffset === 0}
+                  onClick={() => {
+                    setWeekOffset((i) => i - 1);
+                    setSelectedDay(0);
+                  }}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <span className="text-xs font-medium min-w-[56px] text-center text-muted-foreground">
+                  {weekOffset + 1}/{totalWeeks}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={weekOffset >= totalWeeks - 1}
+                  onClick={() => {
+                    setWeekOffset((i) => i + 1);
+                    setSelectedDay(0);
+                  }}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            )}
           </div>
 
           {/* Menu */}
@@ -283,18 +299,20 @@ export function WeeklyView({
                 <LayoutTemplate className="mr-2 h-4 w-4" />
                 Templates
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={onEndPlan}
-                disabled={endingPlan}
-                className="text-destructive focus:text-destructive"
-              >
-                {endingPlan ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Square className="mr-2 h-4 w-4" />
-                )}
-                End Plan
-              </DropdownMenuItem>
+              {!isAdhoc && (
+                <DropdownMenuItem
+                  onClick={onEndPlan}
+                  disabled={endingPlan}
+                  className="text-destructive focus:text-destructive"
+                >
+                  {endingPlan ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Square className="mr-2 h-4 w-4" />
+                  )}
+                  End Plan
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -419,7 +437,7 @@ export function WeeklyView({
           {visibleCategories.map((category) => (
             <div
               key={category}
-              className="grid flex-1 min-h-0 gap-1 lg:gap-1.5 2xl:max-h-[160px]"
+              className="grid flex-1 min-h-0 gap-1 lg:gap-1.5 md:max-h-[280px] lg:max-h-[220px] 2xl:max-h-[160px]"
               style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}
             >
               {/* Row label */}

@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // and forget — loadUnitStandards falls back to bundled defaults on any
       // error, so we don't block the auth flow on it.
       if (u) {
-        loadUnitStandards(u.uid).catch(() => {
+        loadUnitStandards(u.uid, activeKey).catch(() => {
           /* handled inside loadUnitStandards */
         });
       }

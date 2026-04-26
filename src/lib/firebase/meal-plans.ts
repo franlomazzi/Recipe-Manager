@@ -18,7 +18,7 @@ import type {
   PlanInstance,
   PlanWeek,
 } from "@/lib/types/meal-plan";
-import { addDays, format, parseISO, differenceInCalendarDays } from "date-fns";
+import { addDays, format, parseISO, differenceInCalendarDays, startOfWeek } from "date-fns";
 
 const TEMPLATES = "nutrition_plan_templates";
 const INSTANCES = "nutrition_plan_instances";
@@ -193,6 +193,67 @@ export async function endInstanceEarly(
 
 export async function deleteInstance(instanceId: string): Promise<void> {
   await deleteDoc(doc(getDb(), INSTANCES, instanceId));
+}
+
+// ── Ad-hoc week ──
+
+export function currentWeekMonday(): string {
+  return format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
+}
+
+export function subscribeToAdhocInstance(
+  userId: string,
+  callback: (instance: PlanInstance | null) => void
+): Unsubscribe {
+  const db = getDb();
+  const monday = currentWeekMonday();
+  const q = query(
+    collection(db, INSTANCES),
+    where("userId", "==", userId),
+    where("status", "==", "adhoc")
+  );
+  return onSnapshot(q, (snap) => {
+    // Clean up stale adhoc docs from past weeks
+    snap.docs.forEach((d) => {
+      if (d.data().startDate !== monday) {
+        deleteDoc(d.ref).catch(() => {});
+      }
+    });
+    const current = snap.docs.find((d) => d.data().startDate === monday);
+    callback(current ? ({ ...current.data(), id: current.id } as PlanInstance) : null);
+  });
+}
+
+export async function createAdhocInstance(userId: string): Promise<PlanInstance> {
+  const db = getDb();
+  const monday = currentWeekMonday();
+  const endDate = format(addDays(parseISO(monday), 6), "yyyy-MM-dd");
+  const emptyWeek: PlanWeek = {
+    days: Array.from({ length: 7 }, () => ({ meals: [] })),
+  };
+  const ref = doc(collection(db, INSTANCES));
+  await setDoc(ref, {
+    id: ref.id,
+    userId,
+    templateId: "",
+    templateName: "Ad-hoc Week",
+    snapshot: [emptyWeek],
+    startDate: monday,
+    endDate,
+    status: "adhoc",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return {
+    id: ref.id,
+    userId,
+    templateId: "",
+    templateName: "Ad-hoc Week",
+    snapshot: [emptyWeek],
+    startDate: monday,
+    endDate,
+    status: "adhoc",
+  };
 }
 
 /**

@@ -59,7 +59,7 @@ export interface PlanInstance {
   snapshot: PlanWeek[];
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
-  status: "active" | "completed" | "ended_early";
+  status: "active" | "completed" | "ended_early" | "adhoc";
   goals?: PlanGoals;
   endedEarlyNote?: string;
   createdAt?: Timestamp;

@@ -7,7 +7,7 @@
 // intentional.
 
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { getDb } from "@/lib/firebase/config";
+import { getDb, type AccountKey } from "@/lib/firebase/config";
 
 export interface UnitStandards {
   authorizedUnits: string[];
@@ -97,10 +97,11 @@ let cached: UnitStandards | null = null;
  * writes — if the doc is missing or errors, fall back to DEFAULT_STANDARDS.
  *
  * Call once per session, after sign-in. Safe to call again to refresh.
+ * Pass `accountKey` explicitly to avoid any timing ambiguity during account switches.
  */
-export async function loadUnitStandards(userId: string): Promise<UnitStandards> {
+export async function loadUnitStandards(userId: string, accountKey?: AccountKey): Promise<UnitStandards> {
   try {
-    const ref = doc(getDb(), "user_preferences", `${userId}_unit_standards`);
+    const ref = doc(getDb(accountKey), "user_preferences", `${userId}_unit_standards`);
     const snap = await getDoc(ref);
     if (snap.exists()) {
       const stored = snap.data() as UnitStandards;
@@ -188,8 +189,8 @@ export function getUnitOptions(): { value: string; label: string }[] {
  * this directly so the user's overrides stay separate from DEFAULT_STANDARDS.
  * Returns an empty standards object if the doc is missing.
  */
-async function readStoredStandards(userId: string): Promise<UnitStandards> {
-  const ref = doc(getDb(), "user_preferences", `${userId}_unit_standards`);
+async function readStoredStandards(userId: string, accountKey?: AccountKey): Promise<UnitStandards> {
+  const ref = doc(getDb(accountKey), "user_preferences", `${userId}_unit_standards`);
   const snap = await getDoc(ref);
   if (snap.exists()) {
     const data = snap.data() as Partial<UnitStandards>;
@@ -223,8 +224,8 @@ function refreshCache(stored: UnitStandards): UnitStandards {
  * Expose the raw stored standards to the settings editor so delete controls
  * operate on the user's own entries, not the baked-in defaults.
  */
-export async function loadUserStandards(userId: string): Promise<UnitStandards> {
-  return readStoredStandards(userId);
+export async function loadUserStandards(userId: string, accountKey?: AccountKey): Promise<UnitStandards> {
+  return readStoredStandards(userId, accountKey);
 }
 
 /**
@@ -234,7 +235,8 @@ export async function loadUserStandards(userId: string): Promise<UnitStandards> 
  */
 export async function updateUnitStandards(
   userId: string,
-  std: UnitStandards
+  std: UnitStandards,
+  accountKey?: AccountKey
 ): Promise<UnitStandards> {
   const clean: UnitStandards = {
     authorizedUnits: Array.from(
@@ -251,7 +253,7 @@ export async function updateUnitStandards(
     ),
   };
   await setDoc(
-    doc(getDb(), "user_preferences", `${userId}_unit_standards`),
+    doc(getDb(accountKey), "user_preferences", `${userId}_unit_standards`),
     clean,
     { merge: true }
   );
@@ -265,7 +267,8 @@ export async function updateUnitStandards(
  */
 export async function addAuthorizedUnit(
   userId: string,
-  unit: string
+  unit: string,
+  accountKey?: AccountKey
 ): Promise<void> {
   const normalized = unit.toLowerCase().trim();
   if (!normalized) return;
@@ -273,12 +276,12 @@ export async function addAuthorizedUnit(
   const std = getCachedStandards();
   if (std.authorizedUnits.includes(normalized)) return; // already exists
 
-  const stored = await readStoredStandards(userId);
+  const stored = await readStoredStandards(userId, accountKey);
   if (!stored.authorizedUnits.includes(normalized)) {
     stored.authorizedUnits.push(normalized);
   }
   await setDoc(
-    doc(getDb(), "user_preferences", `${userId}_unit_standards`),
+    doc(getDb(accountKey), "user_preferences", `${userId}_unit_standards`),
     stored,
     { merge: true }
   );

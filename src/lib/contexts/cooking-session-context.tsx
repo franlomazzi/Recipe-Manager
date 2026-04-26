@@ -31,7 +31,8 @@ type Action =
   | { type: "ADJUST_TIMER"; timerId: string; deltaSeconds: number }
   | { type: "TICK_TIMERS"; completedIds: string[] }
   | { type: "ACKNOWLEDGE_ALL_ALARMS" }
-  | { type: "ACKNOWLEDGE_TIMER"; timerId: string };
+  | { type: "ACKNOWLEDGE_TIMER"; timerId: string }
+  | { type: "SET_SCALED_INSTRUCTIONS"; recipeId: string; map: Record<string, string> };
 
 interface State {
   sessions: CookingSession[];
@@ -209,6 +210,15 @@ function reducer(state: State, action: Action): State {
         acknowledgedIds: state.acknowledgedIds.includes(action.timerId)
           ? state.acknowledgedIds
           : [...state.acknowledgedIds, action.timerId],
+      };
+    case "SET_SCALED_INSTRUCTIONS":
+      return {
+        ...state,
+        sessions: state.sessions.map((s) =>
+          s.recipeId === action.recipeId
+            ? { ...s, scaledInstructions: action.map }
+            : s
+        ),
       };
     case "TICK_TIMERS":
       return {
@@ -444,6 +454,13 @@ export function CookingSessionProvider({
     []
   );
 
+  const setScaledInstructions = useCallback(
+    (recipeId: string, map: Record<string, string>) => {
+      dispatch({ type: "SET_SCALED_INSTRUCTIONS", recipeId, map });
+    },
+    []
+  );
+
   return (
     <CookingSessionContext.Provider
       value={{
@@ -456,6 +473,7 @@ export function CookingSessionProvider({
         updateSession,
         setStepNote,
         appendStepNote,
+        setScaledInstructions,
         startTimer,
         pauseTimer,
         resumeTimer,

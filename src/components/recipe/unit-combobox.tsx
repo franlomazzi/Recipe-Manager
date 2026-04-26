@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
 import { ChevronDown, Plus } from "lucide-react";
 import { useAuth } from "@/lib/contexts/auth-context";
+import { useActiveAccount } from "@/lib/contexts/active-account-context";
 import {
   getUnitOptions,
   isCanonicalUnit,
@@ -32,6 +33,7 @@ export function UnitCombobox({
   lockedUnit,
 }: UnitComboboxProps) {
   const { user } = useAuth();
+  const { activeKey } = useActiveAccount();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -94,7 +96,7 @@ export function UnitCombobox({
     if (!user || !search.trim()) return;
     const normalized = search.trim().toLowerCase();
     try {
-      await addAuthorizedUnit(user.uid, normalized);
+      await addAuthorizedUnit(user.uid, normalized, activeKey);
       onValueChange(normalized);
       setSearch("");
       setOpen(false);

@@ -88,7 +88,8 @@ function currentStepText(session: CookingSession): string {
     return `Ingredients — ${session.recipe.ingredients.length} items for ${session.recipe.servings} servings.`;
   }
   const step = session.recipe.steps[session.currentStep - 1];
-  return step?.instruction ?? "";
+  if (!step) return "";
+  return session.scaledInstructions?.[step.id] ?? step.instruction;
 }
 
 function formatDurationSpeech(seconds: number): string {

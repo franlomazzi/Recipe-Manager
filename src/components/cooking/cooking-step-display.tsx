@@ -13,6 +13,7 @@ import {
   ChefHat,
   ShoppingBasket,
   Lightbulb,
+  Loader2,
   Timer,
   Play,
   Pause,
@@ -452,11 +453,16 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
         ) : viewMode === "focus" ? (
           /* ── Focus: single large step ── */
           <div className="max-w-2xl lg:max-w-3xl text-center">
-            <div className="mb-6 inline-flex h-14 w-14 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-primary text-2xl md:text-3xl font-bold text-primary-foreground shadow-lg">
+            <div className="relative mb-6 inline-flex h-14 w-14 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-primary text-2xl md:text-3xl font-bold text-primary-foreground shadow-lg">
               {currentStep}
+              {servingMultiplier !== 1 && !session.scaledInstructions && (
+                <span className="absolute -top-1.5 -right-1.5">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </span>
+              )}
             </div>
             <p className="text-2xl font-medium leading-relaxed md:text-3xl lg:text-4xl">
-              {realStep!.instruction}
+              {session.scaledInstructions?.[realStep!.id] ?? realStep!.instruction}
             </p>
 
             {realStep!.timerMinutes && (
@@ -598,7 +604,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
                               textSize
                             )}
                           >
-                            {step.instruction}
+                            {session.scaledInstructions?.[step.id] ?? step.instruction}
                           </p>
                           {step.timerMinutes && (
                             <InlineStepTimer

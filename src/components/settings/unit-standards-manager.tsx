@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
+import { useActiveAccount } from "@/lib/contexts/active-account-context";
 import {
   Card,
   CardContent,
@@ -65,6 +66,7 @@ Example: alias "gramms" → "g" fixes a common typo in imported recipes.
 
 export function UnitStandardsManager() {
   const { user } = useAuth();
+  const { activeKey } = useActiveAccount();
   const [stored, setStored] = useState<UnitStandards | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -79,7 +81,7 @@ export function UnitStandardsManager() {
     (async () => {
       setLoading(true);
       try {
-        const data = await loadUserStandards(user.uid);
+        const data = await loadUserStandards(user.uid, activeKey);
         if (cancelled) return;
         setStored(data);
         setTargetUnit(
@@ -123,9 +125,9 @@ export function UnitStandardsManager() {
     if (!user) return;
     setSaving(true);
     try {
-      await updateUnitStandards(user.uid, updated);
+      await updateUnitStandards(user.uid, updated, activeKey);
       setStored(updated);
-      await loadUnitStandards(user.uid);
+      await loadUnitStandards(user.uid, activeKey);
     } catch (err) {
       console.error("Failed to save unit standards:", err);
       toast.error("Failed to save changes");

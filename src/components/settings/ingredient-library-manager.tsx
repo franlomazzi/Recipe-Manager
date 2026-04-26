@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BookMarked, Trash2 } from "lucide-react";
+import { BookMarked, ChevronDown, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { LibraryIngredient } from "@/lib/types/recipe";
 
@@ -21,6 +21,7 @@ export function IngredientLibraryManager() {
   const [items, setItems] = useState<LibraryIngredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -89,11 +90,19 @@ export function IngredientLibraryManager() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BookMarked className="h-5 w-5 text-primary" />
-          Ingredient Library
-        </CardTitle>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <BookMarked className="h-5 w-5 text-primary" />
+            Ingredient Library
+          </CardTitle>
+          <ChevronDown
+            className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+          />
+        </div>
         <CardDescription>
           Ingredients you&apos;ve added through recipes.{" "}
           {!loading && (
@@ -103,34 +112,36 @@ export function IngredientLibraryManager() {
           )}
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        ) : items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No ingredients yet — they&apos;ll appear here as you add recipes.
-          </p>
-        ) : (
-          <div className="space-y-4">
-            {regular.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                  Ingredients ({regular.length})
-                </p>
-                <div>{regular.map(renderRow)}</div>
-              </div>
-            )}
-            {pantry.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                  Pantry Items ({pantry.length})
-                </p>
-                <div>{pantry.map(renderRow)}</div>
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
+      {expanded && (
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No ingredients yet — they&apos;ll appear here as you add recipes.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {regular.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                    Ingredients ({regular.length})
+                  </p>
+                  <div>{regular.map(renderRow)}</div>
+                </div>
+              )}
+              {pantry.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                    Pantry Items ({pantry.length})
+                  </p>
+                  <div>{pantry.map(renderRow)}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      )}
     </Card>
   );
 }
