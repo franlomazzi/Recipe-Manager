@@ -48,6 +48,7 @@ export interface DraftRecipe {
   ingredients: DraftIngredient[];
   steps: DraftStep[];
   sourceUrl?: string;
+  detectedLanguage?: "en" | "es" | "other";
 }
 
 export interface ImportRecipeResponse {

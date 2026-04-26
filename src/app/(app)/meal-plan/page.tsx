@@ -35,7 +35,7 @@ export default function MealPlanPage() {
   const isKT = useKitchenTool();
   const { templates, loading: templatesLoading } = usePlanTemplates();
   const { instance, loading: planLoading } = useActivePlan();
-  const { adhocInstance, ensureAdhocInstance } = useAdhocWeek();
+  const { adhocWeeks, updateAdhocDay } = useAdhocWeek();
 
   const [showTemplates, setShowTemplates] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -322,17 +322,18 @@ export default function MealPlanPage() {
     );
   }
 
-  // ─── Ad-hoc week view (no active plan) ───
+  // ─── Freestyle view (no active plan) ───
   if (!instance) {
     const monday = currentWeekMonday();
-    const adhocShell: PlanInstance = adhocInstance ?? {
-      id: "",
+    const emptyDays = () => Array.from({ length: 7 }, () => ({ meals: [] }));
+    const freestyleInstance: PlanInstance = {
+      id: "freestyle",
       userId: user!.uid,
       templateId: "",
-      templateName: "Ad-hoc Week",
-      snapshot: [{ days: Array.from({ length: 7 }, () => ({ meals: [] })) }],
+      templateName: "Freestyle",
+      snapshot: adhocWeeks.map((w) => w?.snapshot[0] ?? { days: emptyDays() }),
       startDate: monday,
-      endDate: format(addDays(parseISO(monday), 6), "yyyy-MM-dd"),
+      endDate: format(addDays(parseISO(monday), 27), "yyyy-MM-dd"),
       status: "adhoc",
     };
     return (
@@ -347,11 +348,11 @@ export default function MealPlanPage() {
           </button>
         </div>
         <WeeklyView
-          instance={adhocShell}
+          instance={freestyleInstance}
           onShowTemplates={() => setShowTemplates(true)}
           onEndPlan={() => {}}
           endingPlan={false}
-          onEnsureInstance={ensureAdhocInstance}
+          onUpdateDay={updateAdhocDay}
         />
         <TemplateEditor
           open={editorOpen}

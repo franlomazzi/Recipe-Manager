@@ -61,7 +61,7 @@ import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
 import { saveIngredientToLibrary } from "@/lib/firebase/ingredient-library";
 import { IngredientCombobox } from "@/components/recipe/ingredient-combobox";
 import { findLibraryMatches } from "@/lib/utils/ingredient-match";
-import { CheckCircle2, Package } from "lucide-react";
+import { CheckCircle2, Package, Pencil } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -176,6 +176,8 @@ interface SortableIngredientRowProps {
   onKeepAsNew: (ingredientId: string) => void;
   onReopenReview: (ingredientId: string) => void;
   onRestore: (index: number, original: { quantity: number | null; unit: string }) => void;
+  onUnitChange?: (index: number, newUnit: string) => Promise<void>;
+  isConvertingUnit?: boolean;
 }
 
 function SortableIngredientRow({
@@ -192,6 +194,8 @@ function SortableIngredientRow({
   onKeepAsNew,
   onReopenReview,
   onRestore,
+  onUnitChange,
+  isConvertingUnit,
 }: SortableIngredientRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: ing.id });
@@ -199,6 +203,22 @@ function SortableIngredientRow({
   const isPending = review?.type === "pending";
   const isMatched = review?.type === "matched";
   const isNew = review?.type === "new";
+
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(ing.name);
+
+  function openRename() {
+    setRenameValue(ing.name);
+    setIsRenaming(true);
+  }
+
+  function commitRename() {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== ing.name) {
+      onUpdateIngredient(index, "name", trimmed);
+    }
+    setIsRenaming(false);
+  }
   const hasDrifted =
     !!original &&
     (original.quantity !== ing.quantity ||
@@ -230,9 +250,9 @@ function SortableIngredientRow({
         >
           <GripVertical className="h-4 w-4 shrink-0" />
         </div>
-        <div className="grid flex-1 grid-cols-6 sm:grid-cols-12 gap-2">
+        <div className="grid flex-1 grid-cols-2 sm:grid-cols-12 gap-2">
           <Input
-            className="col-span-2"
+            className="col-span-1 sm:col-span-2"
             placeholder="Qty"
             type="number"
             step="any"
@@ -243,10 +263,10 @@ function SortableIngredientRow({
             }
           />
           <UnitCombobox
-            className="col-span-2"
+            className="col-span-1 sm:col-span-2"
             value={ing.unit}
-            onValueChange={(v) => onUpdateIngredient(index, "unit", v)}
-            lockedUnit={ing.reference?.unit}
+            onValueChange={(v) => onUnitChange ? void onUnitChange(index, v) : onUpdateIngredient(index, "unit", v)}
+            lockedUnit={isConvertingUnit ? ing.unit : ing.reference?.unit}
           />
           <IngredientCombobox
             className="col-span-2 sm:col-span-5"
@@ -254,9 +274,11 @@ function SortableIngredientRow({
             libraryItems={libraryItems}
             onSelectLibraryItem={(item) => onSelectLibraryItem(index, item)}
             onNameChange={(name) => onUpdateIngredient(index, "name", name)}
+            onConfirmNew={() => onKeepAsNew(ing.id)}
+            isConfirmedNew={isNew}
           />
           <Input
-            className="col-span-5 sm:col-span-3"
+            className="col-span-2 sm:col-span-3"
             placeholder="Note (optional)"
             value={ing.note}
             onChange={(e) => onUpdateIngredient(index, "note", e.target.value)}
@@ -293,20 +315,50 @@ function SortableIngredientRow({
 
       {(isMatched || isNew) && (
         <div className="mt-2 ml-6 flex items-center gap-2 text-xs">
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-          <span className="text-muted-foreground">
-            {isMatched ? (
-              <>
-                Mapped to library ingredient{" "}
-                <span className="font-medium text-foreground">{ing.name}</span>
-              </>
-            ) : (
-              <>
-                Will be saved as a{" "}
-                <span className="font-medium text-foreground">new library ingredient</span>
-              </>
-            )}
-          </span>
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+          {isNew && isRenaming ? (
+            <>
+              <input
+                autoFocus
+                className="border border-border rounded px-1.5 py-0.5 text-xs bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                  if (e.key === "Escape") setIsRenaming(false);
+                }}
+                onBlur={commitRename}
+              />
+              <span className="text-muted-foreground">as new library ingredient</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">
+              {isMatched ? (
+                <>
+                  Mapped to library ingredient{" "}
+                  <span className="font-medium text-foreground">{ing.name}</span>
+                </>
+              ) : (
+                <>
+                  Will be saved as{" "}
+                  <span className="font-medium text-foreground">{ing.name}</span>
+                  {" "}as new library ingredient
+                </>
+              )}
+            </span>
+          )}
+          {isNew && !isRenaming && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={openRename}
+            >
+              <Pencil className="h-3 w-3 mr-1" />
+              Rename
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -622,6 +674,7 @@ export function RecipeForm({
     }
     return out;
   });
+  const [convertingUnitForId, setConvertingUnitForId] = useState<string | null>(null);
   const pendingReviewCount = Object.values(reviewStatus).filter(
     (s) => s.type === "pending"
   ).length;
@@ -845,6 +898,68 @@ export function RecipeForm({
       ...prev,
       [ingredientId]: { type: "pending" },
     }));
+  }
+
+  async function handleImportIngredientUnitChange(index: number, newUnit: string) {
+    const ing = ingredients[index];
+    if (!ing || ing.reference) return; // linked rows are handled elsewhere
+    const original = originalImports[ing.id];
+    if (!original) {
+      // Not an imported ingredient — plain update
+      updateIngredient(index, "unit", newUnit);
+      return;
+    }
+
+    updateIngredient(index, "unit", newUnit);
+
+    // If reverting to the original import unit, restore original qty too
+    if (newUnit === original.unit) {
+      updateIngredient(index, "quantity", original.quantity);
+      return;
+    }
+
+    if (!user || original.quantity == null) return;
+
+    setConvertingUnitForId(ing.id);
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch("/api/convert-unit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ ingredientName: ing.name, fromUnit: original.unit, toUnit: newUnit }),
+      });
+
+      if (!response.ok) {
+        toast.warning(
+          `Couldn't auto-convert ${ing.name} from ${original.unit} to ${newUnit} — review manually.`,
+          { duration: 5000 }
+        );
+        return;
+      }
+
+      const data = (await response.json()) as { factor?: number };
+      if (!data.factor || data.factor <= 0) {
+        toast.warning(
+          `Couldn't auto-convert ${ing.name} from ${original.unit} to ${newUnit} — review manually.`,
+          { duration: 5000 }
+        );
+        return;
+      }
+
+      const converted = applyConversion(
+        { ...ing, quantity: original.quantity, unit: original.unit },
+        { factor: data.factor, targetUnit: newUnit }
+      );
+      setIngredients((prev) => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], quantity: converted.quantity, note: converted.note };
+        return updated;
+      });
+    } catch {
+      toast.warning(`Unit conversion failed — review manually.`, { duration: 5000 });
+    } finally {
+      setConvertingUnitForId(null);
+    }
   }
 
   function addIngredient() {
@@ -1523,6 +1638,8 @@ export function RecipeForm({
                     updateIngredient(idx, "quantity", orig.quantity);
                     updateIngredient(idx, "unit", orig.unit);
                   }}
+                  onUnitChange={originalImports[ing.id] && !ing.reference ? handleImportIngredientUnitChange : undefined}
+                  isConvertingUnit={convertingUnitForId === ing.id}
                 />
               ))}
             </SortableContext>

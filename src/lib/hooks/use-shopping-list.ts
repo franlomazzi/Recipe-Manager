@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useRecipes } from "./use-recipes";
-import { useActivePlan } from "./use-active-plan";
 import { useIngredientLibrary } from "./use-ingredient-library";
 import { useHouseholdPantryState } from "./use-household-pantry-state";
 import {
@@ -222,11 +221,11 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
   });
 }
 
-export function useShoppingList(weekIndex: number = 0) {
+export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstance | null) {
   const { user } = useAuth();
   const { recipes } = useRecipes();
-  const { instance } = useActivePlan();
   const { items: libraryItems } = useIngredientLibrary();
+  const instance = planInstance ?? null;
   const { state: pantryState, householdId } = useHouseholdPantryState();
   const [state, setState] = useState<ShoppingListState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -415,7 +414,7 @@ export function useShoppingList(weekIndex: number = 0) {
     pantryProcessed,
     sharedPantryCheckedByWeek: pantryState.pantryCheckedKeysByWeek,
     loading,
-    hasActivePlan: !!instance,
-    instance,
+    hasActivePlan: !!planInstance,
+    instance: planInstance ?? null,
   };
 }

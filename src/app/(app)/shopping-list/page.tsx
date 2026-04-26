@@ -6,7 +6,6 @@ import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useHousehold } from "@/lib/contexts/household-context";
 import { useShoppingList } from "@/lib/hooks/use-shopping-list";
 import { useShoppingOrganization } from "@/lib/hooks/use-shopping-organization";
-import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import {
   toggleCheckedKey,
   addRecipeToWeek,
@@ -78,6 +77,9 @@ import {
   differenceInCalendarDays,
 } from "date-fns";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
+import { useAdhocWeek } from "@/lib/hooks/use-adhoc-week";
+import { currentWeekMonday } from "@/lib/firebase/meal-plans";
+import type { PlanInstance } from "@/lib/types/meal-plan";
 import type { ShoppingItem, CustomShoppingItem } from "@/lib/types/shopping-list";
 import { toast } from "sonner";
 
@@ -89,25 +91,43 @@ export default function ShoppingListPage() {
   const isKT = useKitchenTool();
   const { householdId } = useHousehold();
   const { instance } = useActivePlan();
+  const { adhocWeeks } = useAdhocWeek();
   const { locations, categories } = useShoppingOrganization();
+
+  // Build a virtual 4-week freestyle instance when there's no active plan.
+  // Mirrors the same construction used on the meal plan page.
+  const freestyleInstance = useMemo<PlanInstance>(() => {
+    const monday = currentWeekMonday();
+    return {
+      id: "freestyle",
+      userId: user?.uid ?? "",
+      templateId: "",
+      templateName: "Freestyle",
+      snapshot: adhocWeeks.map((w) => w?.snapshot[0] ?? { days: Array.from({ length: 7 }, () => ({ meals: [] })) }),
+      startDate: monday,
+      endDate: format(addDays(parseISO(monday), 27), "yyyy-MM-dd"),
+      status: "adhoc",
+    };
+  }, [adhocWeeks, user?.uid]);
+
+  // Use the active plan if one exists, otherwise fall back to the freestyle window.
+  const effectiveInstance = instance ?? freestyleInstance;
 
   // Calendar-week offset: 0 = Monday of the week containing plan start.
   // Computed the same way as weekly-view so the two pages stay in sync.
   const calendarWeekMeta = useMemo(() => {
-    if (!instance) return { firstMonday: new Date(), totalWeeks: 1 };
-    const planStart = parseISO(instance.startDate);
-    const planEnd = addDays(planStart, instance.snapshot.length * 7 - 1);
+    const planStart = parseISO(effectiveInstance.startDate);
+    const planEnd = addDays(planStart, effectiveInstance.snapshot.length * 7 - 1);
     const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
     const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
     const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
     return { firstMonday, totalWeeks };
-  }, [instance]);
+  }, [effectiveInstance]);
 
   const [weekIndex, setWeekIndex] = useState(() => {
-    if (!instance) return 0;
-    const planStart = parseISO(instance.startDate);
+    const planStart = parseISO(effectiveInstance.startDate);
     const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
-    const planEnd = addDays(planStart, instance.snapshot.length * 7 - 1);
+    const planEnd = addDays(planStart, effectiveInstance.snapshot.length * 7 - 1);
     const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
     const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
     const todayMonday = startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -134,7 +154,7 @@ export default function ShoppingListPage() {
     sharedPantryCheckedByWeek,
     loading,
     hasActivePlan,
-  } = useShoppingList(weekIndex);
+  } = useShoppingList(weekIndex, effectiveInstance);
 
   const { pantryItems } = usePantryItems();
   const { items: libraryItems } = useIngredientLibrary();
@@ -149,11 +169,10 @@ export default function ShoppingListPage() {
   const [pantryAssigning, setPantryAssigning] = useState<LibraryIngredient | null>(null);
 
   const weekRange = useMemo(() => {
-    if (!instance) return null;
     const start = addDays(calendarWeekMeta.firstMonday, weekIndex * 7);
     const end = addDays(start, 6);
     return { start, end };
-  }, [instance, weekIndex, calendarWeekMeta]);
+  }, [weekIndex, calendarWeekMeta]);
 
   // Lookup map
   const locationMap = useMemo(
@@ -671,13 +690,13 @@ export default function ShoppingListPage() {
       </div>
 
       {/* Week selector */}
-      {hasActivePlan && instance && weekRange && (
+      {weekRange && (
         <Card className="pt-0">
           <CardContent className="flex items-center gap-3 px-3 py-2">
             <CalendarDays className="h-4 w-4 text-primary shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-muted-foreground">
-                {instance.templateName} · Week {weekIndex + 1}/
+                {effectiveInstance.templateName} · Week {weekIndex + 1}/
                 {calendarWeekMeta.totalWeeks}
               </p>
               <p className="text-sm font-semibold truncate">
@@ -716,7 +735,7 @@ export default function ShoppingListPage() {
             <Badge variant="secondary" className="rounded-lg gap-1.5">
               <CalendarDays className="h-3 w-3" />
               {planRecipes.length} recipe{planRecipes.length === 1 ? "" : "s"}{" "}
-              from meal plan
+              from {effectiveInstance.status === "adhoc" ? "freestyle" : "meal plan"}
             </Badge>
           )}
           {extraRecipes.map(({ entry, recipe: r }) => (

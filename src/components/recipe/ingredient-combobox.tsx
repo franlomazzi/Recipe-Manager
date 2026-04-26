@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
-import { Search, Plus, Package } from "lucide-react";
+import { Search, Plus, Package, CheckCircle2 } from "lucide-react";
 import type { LibraryIngredient } from "@/lib/types/recipe";
 
 interface IngredientComboboxProps {
@@ -11,6 +11,8 @@ interface IngredientComboboxProps {
   libraryItems: LibraryIngredient[];
   onSelectLibraryItem: (item: LibraryIngredient) => void;
   onNameChange: (name: string) => void;
+  onConfirmNew?: () => void;
+  isConfirmedNew?: boolean;
   className?: string;
 }
 
@@ -19,6 +21,8 @@ export function IngredientCombobox({
   libraryItems,
   onSelectLibraryItem,
   onNameChange,
+  onConfirmNew,
+  isConfirmedNew,
   className,
 }: IngredientComboboxProps) {
   const [open, setOpen] = useState(false);
@@ -49,9 +53,10 @@ export function IngredientCombobox({
   const updatePosition = useCallback(() => {
     if (!wrapperRef.current) return;
     const rect = wrapperRef.current.getBoundingClientRect();
+    const maxLeft = window.innerWidth - rect.width - 8;
     setPos({
       top: rect.bottom + 4 + window.scrollY,
-      left: rect.left + window.scrollX,
+      left: Math.min(rect.left + window.scrollX, maxLeft + window.scrollX),
       width: rect.width,
     });
   }, []);
@@ -151,17 +156,25 @@ export function IngredientCombobox({
             ))}
 
             {!exactMatch && search.trim() && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent text-left border-t border-border text-primary transition-colors"
-                onClick={() => {
-                  onNameChange(search.trim());
-                  setOpen(false);
-                }}
-              >
-                <Plus className="h-3.5 w-3.5 shrink-0" />
-                <span>Add &quot;{search.trim()}&quot; as new ingredient</span>
-              </button>
+              isConfirmedNew ? (
+                <div className="flex w-full items-center gap-2 px-3 py-2 text-sm border-t border-border text-emerald-600">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  <span>Already added as new ingredient</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent text-left border-t border-border text-primary transition-colors"
+                  onClick={() => {
+                    onNameChange(search.trim());
+                    onConfirmNew?.();
+                    setOpen(false);
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">&quot;{search.trim()}&quot; as new ingredient</span>
+                </button>
+              )
             )}
 
             {displayItems.length === 0 && exactMatch && (

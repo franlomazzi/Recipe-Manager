@@ -136,6 +136,12 @@ export const RECIPE_RESPONSE_SCHEMA = {
         required: ["order", "instruction", "timerMinutes", "timerLabel"],
       },
     },
+    detectedLanguage: {
+      type: "STRING",
+      enum: ["en", "es", "other"],
+      description:
+        "Primary language of the recipe text. 'en' for English, 'es' for Spanish, 'other' for anything else.",
+    },
   },
   required: [
     "title",
@@ -148,6 +154,7 @@ export const RECIPE_RESPONSE_SCHEMA = {
     "notes",
     "ingredients",
     "steps",
+    "detectedLanguage",
   ],
 } as const;
 
@@ -158,4 +165,5 @@ export const SYSTEM_PROMPT = `You convert raw recipe content (pasted text, webpa
 - Normalize units to the allowed enum. Convert grams of weight to 'g', milliliters to 'ml', etc. If the source gives both metric and imperial, prefer metric.
 - Split compound ingredient lines like '2 cups flour, sifted' into quantity=2, unit='cup', name='flour', note='sifted'.
 - Steps should read as imperative cooking actions. Preserve any explicit timings in the step text, and mirror them in the structured timerMinutes / timerLabel fields. Only set timerMinutes when the source names a concrete duration — leave it at 0 for vague cues like "until golden", "to taste", or "overnight". For ranges like "10-12 minutes", use the upper bound.
-- Use 0 for unknown times and 4 for unknown servings. Do not leave numbers blank.`;
+- Use 0 for unknown times and 4 for unknown servings. Do not leave numbers blank.
+- Set detectedLanguage to the primary language of the recipe text: 'en' for English, 'es' for Spanish, or 'other' for anything else.`;

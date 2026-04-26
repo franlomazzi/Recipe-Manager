@@ -52,7 +52,8 @@ interface WeeklyViewProps {
   onShowTemplates: () => void;
   onEndPlan: () => void;
   endingPlan: boolean;
-  onEnsureInstance?: () => Promise<PlanInstance>;
+  /** Freestyle mode: replaces the default updateInstanceDay write for all day updates. */
+  onUpdateDay?: (weekIndex: number, dayIndex: number, updatedDay: PlanDay) => Promise<void>;
 }
 
 const CATEGORY_EMOJI: Record<string, string> = {
@@ -67,7 +68,7 @@ export function WeeklyView({
   onShowTemplates,
   onEndPlan,
   endingPlan,
-  onEnsureInstance,
+  onUpdateDay,
 }: WeeklyViewProps) {
   const isAdhoc = instance.status === "adhoc";
   const router = useRouter();
@@ -202,17 +203,14 @@ export function WeeklyView({
     const { weekIndex, dayIndex } = indices;
     const day = instance.snapshot[weekIndex]?.days[dayIndex];
     if (!day) return;
-
-    let instanceId = instance.id;
-    if (!instanceId && onEnsureInstance) {
-      const real = await onEnsureInstance();
-      instanceId = real.id;
-    }
-
     const updatedDay: PlanDay = {
       meals: [...day.meals.filter((m) => m.category !== pickerTarget.category), meal],
     };
-    await updateInstanceDay(instanceId, weekIndex, dayIndex, updatedDay);
+    if (onUpdateDay) {
+      await onUpdateDay(weekIndex, dayIndex, updatedDay);
+    } else {
+      await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
+    }
   }
 
   async function removeMeal(colIdx: number, category: string) {
@@ -224,7 +222,11 @@ export function WeeklyView({
     const updatedDay: PlanDay = {
       meals: day.meals.filter((m) => m.category !== category),
     };
-    await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
+    if (onUpdateDay) {
+      await onUpdateDay(weekIndex, dayIndex, updatedDay);
+    } else {
+      await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
+    }
   }
 
   function launchCook(mealId: string) {
@@ -244,45 +246,39 @@ export function WeeklyView({
         <div className="flex items-center gap-2 mb-2 shrink-0">
           <div className="min-w-0 flex-1">
             <h2 className="text-sm md:text-base font-semibold truncate">
-              {isAdhoc ? "This week" : instance.templateName}
+              {isAdhoc ? "Freestyle" : instance.templateName}
             </h2>
           </div>
 
           {/* Week nav */}
           <div className="flex items-center gap-1 shrink-0">
-            {isAdhoc ? (
-              <span className="text-xs text-muted-foreground">Resets Mon</span>
-            ) : (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={weekOffset === 0}
-                  onClick={() => {
-                    setWeekOffset((i) => i - 1);
-                    setSelectedDay(0);
-                  }}
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </Button>
-                <span className="text-xs font-medium min-w-[56px] text-center text-muted-foreground">
-                  {weekOffset + 1}/{totalWeeks}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={weekOffset >= totalWeeks - 1}
-                  onClick={() => {
-                    setWeekOffset((i) => i + 1);
-                    setSelectedDay(0);
-                  }}
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              </>
-            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={weekOffset === 0}
+              onClick={() => {
+                setWeekOffset((i) => i - 1);
+                setSelectedDay(0);
+              }}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <span className="text-xs font-medium min-w-[56px] text-center text-muted-foreground">
+              {weekOffset + 1}/{totalWeeks}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={weekOffset >= totalWeeks - 1}
+              onClick={() => {
+                setWeekOffset((i) => i + 1);
+                setSelectedDay(0);
+              }}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
           </div>
 
           {/* Menu */}

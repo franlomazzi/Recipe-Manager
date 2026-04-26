@@ -75,9 +75,11 @@ export function UnitCombobox({
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
+    const dropdownWidth = 224; // w-56
+    const maxLeft = window.innerWidth - dropdownWidth - 8;
     setDropdownPos({
       top: rect.bottom + 4 + window.scrollY,
-      left: rect.left + window.scrollX,
+      left: Math.min(rect.left + window.scrollX, maxLeft + window.scrollX),
     });
   }, []);
 

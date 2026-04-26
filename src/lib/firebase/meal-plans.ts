@@ -195,39 +195,61 @@ export async function deleteInstance(instanceId: string): Promise<void> {
   await deleteDoc(doc(getDb(), INSTANCES, instanceId));
 }
 
-// ── Ad-hoc week ──
+// ── Freestyle (adhoc) weeks ──
 
 export function currentWeekMonday(): string {
   return format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
 }
 
-export function subscribeToAdhocInstance(
+/** Returns ISO strings for the current week's Monday + 3 future Mondays. */
+export function getWindowMondaysISO(): string[] {
+  const base = startOfWeek(new Date(), { weekStartsOn: 1 });
+  return Array.from({ length: 4 }, (_, i) =>
+    format(addDays(base, i * 7), "yyyy-MM-dd")
+  );
+}
+
+/**
+ * Subscribe to all freestyle instances within the 4-week window.
+ * Returns a map of { mondayISO → PlanInstance }.
+ * Cleans up docs from past weeks as a side-effect.
+ */
+export function subscribeToAdhocInstances(
   userId: string,
-  callback: (instance: PlanInstance | null) => void
+  callback: (instances: Map<string, PlanInstance>) => void
 ): Unsubscribe {
   const db = getDb();
-  const monday = currentWeekMonday();
+  const currentMonday = currentWeekMonday();
   const q = query(
     collection(db, INSTANCES),
     where("userId", "==", userId),
     where("status", "==", "adhoc")
   );
   return onSnapshot(q, (snap) => {
-    // Clean up stale adhoc docs from past weeks
+    // Delete docs from past weeks
     snap.docs.forEach((d) => {
-      if (d.data().startDate !== monday) {
+      if (d.data().startDate < currentMonday) {
         deleteDoc(d.ref).catch(() => {});
       }
     });
-    const current = snap.docs.find((d) => d.data().startDate === monday);
-    callback(current ? ({ ...current.data(), id: current.id } as PlanInstance) : null);
+    const map = new Map<string, PlanInstance>();
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (data.startDate >= currentMonday) {
+        map.set(data.startDate, { ...data, id: d.id } as PlanInstance);
+      }
+    });
+    callback(map);
   });
 }
 
-export async function createAdhocInstance(userId: string): Promise<PlanInstance> {
+/** Create a freestyle instance for a specific week (identified by its Monday ISO). */
+export async function createAdhocInstance(
+  userId: string,
+  mondayISO: string
+): Promise<PlanInstance> {
   const db = getDb();
-  const monday = currentWeekMonday();
-  const endDate = format(addDays(parseISO(monday), 6), "yyyy-MM-dd");
+  const endDate = format(addDays(parseISO(mondayISO), 6), "yyyy-MM-dd");
   const emptyWeek: PlanWeek = {
     days: Array.from({ length: 7 }, () => ({ meals: [] })),
   };
@@ -236,9 +258,9 @@ export async function createAdhocInstance(userId: string): Promise<PlanInstance>
     id: ref.id,
     userId,
     templateId: "",
-    templateName: "Ad-hoc Week",
+    templateName: "Freestyle",
     snapshot: [emptyWeek],
-    startDate: monday,
+    startDate: mondayISO,
     endDate,
     status: "adhoc",
     createdAt: serverTimestamp(),
@@ -248,9 +270,9 @@ export async function createAdhocInstance(userId: string): Promise<PlanInstance>
     id: ref.id,
     userId,
     templateId: "",
-    templateName: "Ad-hoc Week",
+    templateName: "Freestyle",
     snapshot: [emptyWeek],
-    startDate: monday,
+    startDate: mondayISO,
     endDate,
     status: "adhoc",
   };
