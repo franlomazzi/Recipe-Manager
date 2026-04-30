@@ -64,7 +64,7 @@ import { useCookingSession } from "@/lib/contexts/cooking-session-context";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { addRecipeToWeek, subscribeToShoppingListState } from "@/lib/firebase/shopping-list";
-import { isoWeekKeyForOffset } from "@/lib/utils/week-keys";
+import { isoWeekKey, isoWeekKeyForOffset } from "@/lib/utils/week-keys";
 import type { ExtraRecipeEntry } from "@/lib/types/shopping-list";
 import {
   addDays,
@@ -125,36 +125,35 @@ export default function RecipeDetailPage() {
     return unsub;
   }, [user]);
 
-  // Calendar-week helpers — same logic as weekly-view and shopping-list page
+  // Calendar-week helpers — same logic as weekly-view and shopping-list page.
+  // When there's no active plan, use a 4-week freestyle window from the current Monday.
   const calendarWeekMeta = useMemo(() => {
-    if (!activePlan) return { firstMonday: new Date(), totalWeeks: 1 };
-    const planStart = parseISO(activePlan.startDate);
-    const planEnd = addDays(planStart, activePlan.snapshot.length * 7 - 1);
-    const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
-    const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
-    const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+    const firstMonday = activePlan
+      ? startOfWeek(parseISO(activePlan.startDate), { weekStartsOn: 1 })
+      : startOfWeek(new Date(), { weekStartsOn: 1 });
+    const totalWeeks = activePlan
+      ? (() => {
+          const planEnd = addDays(parseISO(activePlan.startDate), activePlan.snapshot.length * 7 - 1);
+          const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
+          return differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+        })()
+      : 4;
     return { firstMonday, totalWeeks };
   }, [activePlan]);
 
   // Default shopping week to the current calendar week
   useEffect(() => {
-    if (!activePlan) return;
-    const planStart = parseISO(activePlan.startDate);
-    const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
-    const planEnd = addDays(planStart, activePlan.snapshot.length * 7 - 1);
-    const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
-    const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
+    const { firstMonday, totalWeeks } = calendarWeekMeta;
     const todayMonday = startOfWeek(new Date(), { weekStartsOn: 1 });
     const offset = differenceInCalendarDays(todayMonday, firstMonday) / 7;
     setShoppingWeekIndex(Math.max(0, Math.min(totalWeeks - 1, offset)));
-  }, [activePlan]);
+  }, [calendarWeekMeta]);
 
   const shoppingWeekRange = useMemo(() => {
-    if (!activePlan) return null;
     const start = addDays(calendarWeekMeta.firstMonday, shoppingWeekIndex * 7);
     const end = addDays(start, 6);
     return { start, end };
-  }, [activePlan, shoppingWeekIndex, calendarWeekMeta]);
+  }, [shoppingWeekIndex, calendarWeekMeta]);
 
   const extraByWeek = useMemo(
     () => shoppingListState?.extraByWeek ?? {},
@@ -287,9 +286,7 @@ export default function RecipeDetailPage() {
   async function handleAddToShoppingList() {
     if (!user || !recipe) return;
     setAddingToShopping(true);
-    const weekKey = activePlan
-      ? isoWeekKeyForOffset(activePlan.startDate, shoppingWeekIndex)
-      : String(shoppingWeekIndex);
+    const weekKey = isoWeekKey(addDays(calendarWeekMeta.firstMonday, shoppingWeekIndex * 7));
     try {
       await addRecipeToWeek(user.uid, weekKey, {
         recipeId: recipe.id,
@@ -538,39 +535,31 @@ export default function RecipeDetailPage() {
               </p>
             </div>
 
-            {activePlan ? (
-              <div className="px-6 py-4">
-                <p className="text-xs font-medium text-muted-foreground mb-2">Add to week</p>
-                <div className="flex items-center gap-3 rounded-xl border bg-muted/40 px-3 py-2">
-                  <Button
-                    variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-                    disabled={shoppingWeekIndex === 0}
-                    onClick={() => setShoppingWeekIndex((i) => i - 1)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <div className="flex-1 text-center">
-                    <p className="text-sm font-semibold">Week {shoppingWeekIndex + 1}</p>
-                    {shoppingWeekRange && (
-                      <p className="text-xs text-muted-foreground">
-                        {format(shoppingWeekRange.start, "MMM d")} – {format(shoppingWeekRange.end, "MMM d")}
-                      </p>
-                    )}
-                  </div>
-                  <Button
-                    variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-                    disabled={shoppingWeekIndex >= calendarWeekMeta.totalWeeks - 1}
-                    onClick={() => setShoppingWeekIndex((i) => i + 1)}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
+            <div className="px-6 py-4">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Add to week</p>
+              <div className="flex items-center gap-3 rounded-xl border bg-muted/40 px-3 py-2">
+                <Button
+                  variant="ghost" size="icon" className="h-8 w-8 shrink-0"
+                  disabled={shoppingWeekIndex === 0}
+                  onClick={() => setShoppingWeekIndex((i) => i - 1)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="flex-1 text-center">
+                  <p className="text-sm font-semibold">Week {shoppingWeekIndex + 1}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {format(shoppingWeekRange.start, "MMM d")} – {format(shoppingWeekRange.end, "MMM d")}
+                  </p>
                 </div>
+                <Button
+                  variant="ghost" size="icon" className="h-8 w-8 shrink-0"
+                  disabled={shoppingWeekIndex >= calendarWeekMeta.totalWeeks - 1}
+                  onClick={() => setShoppingWeekIndex((i) => i + 1)}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
-            ) : (
-              <div className="px-6 py-4">
-                <p className="text-sm text-muted-foreground">Ingredients will be added to your shopping list.</p>
-              </div>
-            )}
+            </div>
 
             <div className="flex gap-2 px-6 pb-6 pt-1">
               <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setShowShoppingDialog(false)}>
@@ -1108,7 +1097,7 @@ type KTDetailProps = {
   activePlan: ReturnType<typeof useActivePlan>["instance"];
   shoppingWeekIndex: number;
   setShoppingWeekIndex: (fn: number | ((i: number) => number)) => void;
-  shoppingWeekRange: { start: Date; end: Date } | null;
+  shoppingWeekRange: { start: Date; end: Date };
   totalShoppingWeeks: number;
   addingToShopping: boolean;
   handleAddToShoppingList: () => void | Promise<void>;
@@ -1399,31 +1388,23 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
                 {recipe.ingredients.length} ingredient{recipe.ingredients.length === 1 ? "" : "s"} · {servingMultiplier === 1 ? "default servings" : `${servingMultiplier}× servings`}
               </p>
             </div>
-            {activePlan ? (
-              <div className="px-6 py-4">
-                <p className="kt-eyebrow mb-2">Add to week</p>
-                <div className="flex items-center gap-3 border kt-hair bg-secondary/40 px-3 py-2" style={{ borderRadius: "var(--radius-sm)" }}>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex === 0} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) - 1)}>
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <div className="flex-1 text-center">
-                    <p className="text-sm font-semibold">Week {shoppingWeekIndex + 1}</p>
-                    {shoppingWeekRange && (
-                      <p className="text-xs text-muted-foreground kt-mono">
-                        {format(shoppingWeekRange.start, "MMM d")} – {format(shoppingWeekRange.end, "MMM d")}
-                      </p>
-                    )}
-                  </div>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex >= totalShoppingWeeks - 1} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) + 1)}>
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
+            <div className="px-6 py-4">
+              <p className="kt-eyebrow mb-2">Add to week</p>
+              <div className="flex items-center gap-3 border kt-hair bg-secondary/40 px-3 py-2" style={{ borderRadius: "var(--radius-sm)" }}>
+                <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex === 0} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="flex-1 text-center">
+                  <p className="text-sm font-semibold">Week {shoppingWeekIndex + 1}</p>
+                  <p className="text-xs text-muted-foreground kt-mono">
+                    {format(shoppingWeekRange.start, "MMM d")} – {format(shoppingWeekRange.end, "MMM d")}
+                  </p>
                 </div>
+                <Button variant="ghost" size="icon" className="h-8 w-8" disabled={shoppingWeekIndex >= totalShoppingWeeks - 1} onClick={() => setShoppingWeekIndex((i) => (typeof i === "number" ? i : 0) + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
-            ) : (
-              <div className="px-6 py-4">
-                <p className="text-sm text-muted-foreground">Ingredients will be added to your shopping list.</p>
-              </div>
-            )}
+            </div>
             <div className="flex gap-2 px-6 pb-6 pt-1">
               <Button variant="outline" className="flex-1" onClick={() => setShowShoppingDialog(false)}>Cancel</Button>
               <Button className="flex-1" onClick={handleAddToShoppingList} disabled={addingToShopping}>

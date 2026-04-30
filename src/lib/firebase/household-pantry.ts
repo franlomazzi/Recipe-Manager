@@ -1,8 +1,10 @@
 import {
   doc,
   setDoc,
+  updateDoc,
   onSnapshot,
   serverTimestamp,
+  deleteField,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getDb } from "./config";
@@ -48,15 +50,25 @@ export function subscribeToHouseholdPantryState(
   });
 }
 
+/**
+ * Wrapper: try updateDoc first (fast field-mask patch), fall back to setDoc
+ * if the document doesn't exist yet.
+ */
 async function patchPantryState(
   householdId: string,
-  patch: Partial<HouseholdPantryState>
-) {
-  await setDoc(
-    pantryRef(householdId),
-    { ...patch, updatedAt: serverTimestamp() },
-    { merge: true }
-  );
+  fields: Record<string, unknown>
+): Promise<void> {
+  const ref = pantryRef(householdId);
+  const data = { ...fields, updatedAt: serverTimestamp() };
+  try {
+    await updateDoc(ref, data);
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code === "not-found") {
+      await setDoc(ref, data);
+    } else {
+      throw err;
+    }
+  }
 }
 
 export async function setPantryItemIds(
@@ -90,33 +102,35 @@ export async function setPantryCheckedForWeek(
   householdId: string,
   weekKey: string,
   checkedIds: string[],
-  currentMap: Record<string, string[]>
+  _currentMap: Record<string, string[]>
 ): Promise<void> {
-  const updated = { ...currentMap, [weekKey]: checkedIds };
-  await patchPantryState(householdId, { pantryCheckedByWeek: updated });
+  // Dot-notation: patch only the affected week key.
+  await patchPantryState(householdId, {
+    [`pantryCheckedByWeek.${weekKey}`]: checkedIds,
+  });
 }
 
 export async function commitPantryForWeek(
   householdId: string,
   weekKey: string,
   addedIds: string[],
-  currentAdded: Record<string, string[]>,
-  currentProcessed: Record<string, boolean>
+  _currentAdded: Record<string, string[]>,
+  _currentProcessed: Record<string, boolean>
 ): Promise<void> {
   await patchPantryState(householdId, {
-    pantryAddedByWeek: { ...currentAdded, [weekKey]: addedIds },
-    pantryProcessedByWeek: { ...currentProcessed, [weekKey]: true },
+    [`pantryAddedByWeek.${weekKey}`]: addedIds,
+    [`pantryProcessedByWeek.${weekKey}`]: true,
   });
 }
 
 export async function reopenPantryForWeek(
   householdId: string,
   weekKey: string,
-  currentProcessed: Record<string, boolean>
+  _currentProcessed: Record<string, boolean>
 ): Promise<void> {
-  const updated = { ...currentProcessed };
-  delete updated[weekKey];
-  await patchPantryState(householdId, { pantryProcessedByWeek: updated });
+  await patchPantryState(householdId, {
+    [`pantryProcessedByWeek.${weekKey}`]: deleteField(),
+  });
 }
 
 /**
@@ -134,7 +148,7 @@ export async function toggleSharedPantryCheckedKey(
     ? existing.filter((k) => k !== key)
     : [...existing, key];
   await patchPantryState(householdId, {
-    pantryCheckedKeysByWeek: { ...currentMap, [weekKey]: next },
+    [`pantryCheckedKeysByWeek.${weekKey}`]: next,
   });
 }
 
@@ -150,28 +164,25 @@ export async function migratePantryWeekKey(
 ): Promise<void> {
   if (legacyKey === weekKey) return;
 
-  const patch: Partial<HouseholdPantryState> = {};
+  const patch: Record<string, unknown> = {};
   let dirty = false;
 
   function migrate<T>(
+    fieldPrefix: string,
     field: Record<string, T> | undefined
-  ): Record<string, T> | null {
-    if (!field) return null;
-    if (!(legacyKey in field)) return null;
-    const next = { ...field };
-    if (!(weekKey in next)) next[weekKey] = next[legacyKey];
-    delete next[legacyKey];
-    return next;
+  ): void {
+    if (!field || !(legacyKey in field)) return;
+    if (!(weekKey in field)) {
+      patch[`${fieldPrefix}.${weekKey}`] = field[legacyKey];
+    }
+    patch[`${fieldPrefix}.${legacyKey}`] = deleteField();
+    dirty = true;
   }
 
-  const a = migrate(state.pantryAddedByWeek);
-  if (a) { patch.pantryAddedByWeek = a; dirty = true; }
-  const c = migrate(state.pantryCheckedByWeek);
-  if (c) { patch.pantryCheckedByWeek = c; dirty = true; }
-  const p = migrate(state.pantryProcessedByWeek);
-  if (p) { patch.pantryProcessedByWeek = p; dirty = true; }
-  const ck = migrate(state.pantryCheckedKeysByWeek);
-  if (ck) { patch.pantryCheckedKeysByWeek = ck; dirty = true; }
+  migrate("pantryAddedByWeek", state.pantryAddedByWeek);
+  migrate("pantryCheckedByWeek", state.pantryCheckedByWeek);
+  migrate("pantryProcessedByWeek", state.pantryProcessedByWeek);
+  migrate("pantryCheckedKeysByWeek", state.pantryCheckedKeysByWeek);
 
   if (!dirty) return;
   await patchPantryState(householdId, patch);

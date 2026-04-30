@@ -1,8 +1,10 @@
 import {
   doc,
   setDoc,
+  updateDoc,
   onSnapshot,
   serverTimestamp,
+  deleteField,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getDb } from "./config";
@@ -19,8 +21,25 @@ function docRef(userId: string) {
   return doc(getDb(), COLLECTION, userId);
 }
 
-function baseFields(userId: string) {
-  return { userId, updatedAt: serverTimestamp() };
+/**
+ * Wrapper: try updateDoc first (fast field-mask patch), fall back to setDoc
+ * if the document doesn't exist yet (first-ever shopping list write).
+ */
+async function patchOrCreate(
+  userId: string,
+  fields: Record<string, unknown>
+): Promise<void> {
+  const ref = docRef(userId);
+  const data = { ...fields, updatedAt: serverTimestamp() };
+  try {
+    await updateDoc(ref, data);
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code === "not-found") {
+      await setDoc(ref, { userId, ...data });
+    } else {
+      throw err;
+    }
+  }
 }
 
 export function subscribeToShoppingListState(
@@ -40,11 +59,7 @@ export async function toggleCheckedKey(
   const checkedKeys = currentChecked.includes(key)
     ? currentChecked.filter((k) => k !== key)
     : [...currentChecked, key];
-  await setDoc(
-    docRef(userId),
-    { ...baseFields(userId), checkedKeys },
-    { merge: true }
-  );
+  await patchOrCreate(userId, { checkedKeys });
 }
 
 /** Add a recipe entry to a specific week (allows duplicates — use servingMultiplier to scale) */
@@ -56,12 +71,10 @@ export async function addRecipeToWeek(
 ) {
   const existing = currentByWeek[weekKey] ?? [];
   const newEntry: ExtraRecipeEntry = { ...entry, id: crypto.randomUUID() };
-  const updated = { ...currentByWeek, [weekKey]: [...existing, newEntry] };
-  await setDoc(
-    docRef(userId),
-    { ...baseFields(userId), extraByWeek: updated },
-    { merge: true }
-  );
+  // Use dot-notation to patch only the affected week — avoids rewriting all weeks.
+  await patchOrCreate(userId, {
+    [`extraByWeek.${weekKey}`]: [...existing, newEntry],
+  });
 }
 
 /** Remove a single extra entry by its id from a specific week */
@@ -71,26 +84,17 @@ export async function removeExtraEntry(
   entryId: string,
   currentByWeek: Record<string, ExtraRecipeEntry[]>
 ) {
-  const updated = {
-    ...currentByWeek,
-    [weekKey]: (currentByWeek[weekKey] ?? []).filter((e) => e.id !== entryId),
-  };
-  await setDoc(
-    docRef(userId),
-    { ...baseFields(userId), extraByWeek: updated },
-    { merge: true }
-  );
+  const filtered = (currentByWeek[weekKey] ?? []).filter((e) => e.id !== entryId);
+  await patchOrCreate(userId, {
+    [`extraByWeek.${weekKey}`]: filtered,
+  });
 }
 
 export async function updateCustomItems(
   userId: string,
   customItems: CustomShoppingItem[]
 ) {
-  await setDoc(
-    docRef(userId),
-    { ...baseFields(userId), customItems },
-    { merge: true }
-  );
+  await patchOrCreate(userId, { customItems });
 }
 
 /**
@@ -118,12 +122,10 @@ export async function setOneOffMeta(
     weekMap[itemKey] = cleaned;
   }
 
-  const updated = { ...currentByWeek, [weekKey]: weekMap };
-  await setDoc(
-    docRef(userId),
-    { ...baseFields(userId), oneOffByWeek: updated },
-    { merge: true }
-  );
+  // Patch only the affected week via dot-notation.
+  await patchOrCreate(userId, {
+    [`oneOffByWeek.${weekKey}`]: weekMap,
+  });
 }
 
 /**
@@ -139,33 +141,29 @@ export async function migrateWeekKey(
 ) {
   if (legacyKey === weekKey) return;
 
-  const patch: Partial<ShoppingListState> = {};
+  const patch: Record<string, unknown> = {};
   let dirty = false;
 
-  function migrate<T>(field: Record<string, T> | undefined): Record<string, T> | null {
-    if (!field) return null;
-    if (!(legacyKey in field)) return null;
-    const next = { ...field };
-    if (!(weekKey in next)) {
-      next[weekKey] = next[legacyKey];
+  if (state.extraByWeek && legacyKey in state.extraByWeek) {
+    if (!(weekKey in state.extraByWeek)) {
+      patch[`extraByWeek.${weekKey}`] = state.extraByWeek[legacyKey];
     }
-    delete next[legacyKey];
-    return next;
+    patch[`extraByWeek.${legacyKey}`] = deleteField();
+    dirty = true;
   }
 
-  const extra = migrate(state.extraByWeek);
-  if (extra) { patch.extraByWeek = extra; dirty = true; }
-  const oneOff = migrate(state.oneOffByWeek);
-  if (oneOff) { patch.oneOffByWeek = oneOff; dirty = true; }
+  if (state.oneOffByWeek && legacyKey in state.oneOffByWeek) {
+    if (!(weekKey in state.oneOffByWeek)) {
+      patch[`oneOffByWeek.${weekKey}`] = state.oneOffByWeek[legacyKey];
+    }
+    patch[`oneOffByWeek.${legacyKey}`] = deleteField();
+    dirty = true;
+  }
 
   if (!dirty) return;
-  await setDoc(docRef(userId), { ...baseFields(userId), ...patch }, { merge: true });
+  await patchOrCreate(userId, patch);
 }
 
 export async function clearAllChecked(userId: string) {
-  await setDoc(
-    docRef(userId),
-    { ...baseFields(userId), checkedKeys: [] },
-    { merge: true }
-  );
+  await patchOrCreate(userId, { checkedKeys: [] });
 }
