@@ -399,11 +399,15 @@ export default function RecipeDetailPage() {
           )}
         </div>
         {!isMine && (
-          <div className="mt-2">
+          <div className="mt-2 space-y-2">
             <Badge variant="secondary" className="text-xs">
               <Users className="mr-1 h-3 w-3" />
               Shared by {partnerName ?? "your partner"}
             </Badge>
+            <p className="text-xs text-muted-foreground">
+              This recipe belongs to {partnerName ?? "your partner"} and can&apos;t be edited.
+              Fork it to make your own copy.
+            </p>
           </div>
         )}
         {recipe.description && (
@@ -1179,6 +1183,14 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
         <h1 className="kt-serif text-4xl md:text-5xl font-medium tracking-tight leading-[1.08] mt-2">
           {recipe.title}
         </h1>
+        {!isMine && (
+          <div className="mt-3 flex items-start gap-2 rounded-md border kt-hair bg-secondary/40 px-3 py-2">
+            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />
+            <p className="text-xs text-muted-foreground leading-snug">
+              Shared with you — this recipe can&apos;t be edited. Fork it to make your own copy.
+            </p>
+          </div>
+        )}
         {recipe.description && (
           <p className="kt-serif italic text-base md:text-lg leading-snug mt-3 text-muted-foreground">
             {recipe.description}

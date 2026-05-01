@@ -3,17 +3,19 @@
 import { useState } from "react";
 import { useRecipes } from "@/lib/hooks/use-recipes";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
+import { useAuth } from "@/lib/contexts/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Clock, ChefHat, Heart, Star, LayoutGrid, List } from "lucide-react";
+import { Plus, Search, Clock, ChefHat, Heart, Star, LayoutGrid, List, Users } from "lucide-react";
 import Link from "next/link";
 import { ImportRecipeModal } from "@/components/recipe/import-recipe-modal";
 import type { Recipe } from "@/lib/types/recipe";
 
 export default function RecipesPage() {
   const { recipes } = useRecipes();
+  const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
   const isKT = useKitchenTool();
@@ -32,6 +34,7 @@ export default function RecipesPage() {
         setSearch={setSearch}
         view={view}
         setView={setView}
+        uid={user?.uid}
       />
     );
   }
@@ -96,9 +99,14 @@ export default function RecipesPage() {
                 <CardContent className="p-2.5">
                   <div className="flex items-start justify-between gap-1">
                     <h3 className="font-semibold text-xs line-clamp-1">{recipe.title}</h3>
-                    {recipe.isFavorite && (
-                      <Heart className="h-3 w-3 shrink-0 fill-primary text-primary mt-px" />
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {recipe.userId !== user?.uid && (
+                        <Users className="h-3 w-3 text-muted-foreground" title="Shared with you" />
+                      )}
+                      {recipe.isFavorite && (
+                        <Heart className="h-3 w-3 fill-primary text-primary mt-px" />
+                      )}
+                    </div>
                   </div>
                   <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
                     <span className="flex items-center gap-0.5">
@@ -134,12 +142,14 @@ function KitchenToolRecipes({
   setSearch,
   view,
   setView,
+  uid,
 }: {
   recipes: Recipe[];
   search: string;
   setSearch: (s: string) => void;
   view: "grid" | "list";
   setView: (v: "grid" | "list") => void;
+  uid?: string;
 }) {
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-8 space-y-6">
@@ -230,9 +240,14 @@ function KitchenToolRecipes({
                   <h3 className="kt-serif text-lg font-semibold leading-tight flex-1">
                     {r.title}
                   </h3>
-                  {r.isFavorite && (
-                    <Heart className="h-3.5 w-3.5 shrink-0 fill-primary text-primary mt-1" />
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0 mt-1">
+                    {r.userId !== uid && (
+                      <Users className="h-3.5 w-3.5 text-muted-foreground" title="Shared with you" />
+                    )}
+                    {r.isFavorite && (
+                      <Heart className="h-3.5 w-3.5 fill-primary text-primary" />
+                    )}
+                  </div>
                 </div>
                 <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground kt-mono">
                   <span className="flex items-center gap-1">
@@ -270,6 +285,7 @@ function KitchenToolRecipes({
             >
               <div className="flex items-center gap-3 min-w-0">
                 {r.isFavorite && <Heart className="h-3 w-3 shrink-0 fill-primary text-primary" />}
+                {r.userId !== uid && <Users className="h-3 w-3 shrink-0 text-muted-foreground" title="Shared with you" />}
                 <span className="kt-serif text-base font-medium truncate">{r.title}</span>
               </div>
               <div className="text-right kt-mono text-xs text-muted-foreground">{r.totalTime}m</div>
