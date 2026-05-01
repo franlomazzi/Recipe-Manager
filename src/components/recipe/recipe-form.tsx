@@ -1262,6 +1262,43 @@ export function RecipeForm({
     const prep = parseInt(prepTime) || 0;
     const cook = parseInt(cookTime) || 0;
 
+    // Safety-net: remap any unlinked ingredients (those whose UUID isn't in the
+    // library) to existing library items that share the same name. This catches
+    // cases where the combobox blur / import auto-link didn't fire in time
+    // (e.g. the library hadn't finished loading when the user tabbed away).
+    // We build the resolved arrays before writing to Firestore so the recipe
+    // document always uses the correct, stable library IDs.
+    {
+      const libIdSet = new Set(libraryItems.map((li) => li.id));
+      const libByName = new Map(
+        libraryItems.map((li) => [li.name.trim().toLowerCase(), li])
+      );
+      const idRemap = new Map<string, string>(); // old UUID → library ID
+
+      for (let i = 0; i < validIngredients.length; i++) {
+        const ing = validIngredients[i];
+        if (libIdSet.has(ing.id)) continue; // already linked
+        const match = libByName.get(ing.name.trim().toLowerCase());
+        if (!match) continue; // genuinely new ingredient
+        idRemap.set(ing.id, match.id);
+        validIngredients[i] = { ...ing, id: match.id };
+      }
+
+      if (idRemap.size > 0) {
+        for (let i = 0; i < validSteps.length; i++) {
+          const step = validSteps[i];
+          if (!step.ingredients.some((si) => idRemap.has(si.ingredientId))) continue;
+          validSteps[i] = {
+            ...step,
+            ingredients: step.ingredients.map((si) => ({
+              ...si,
+              ingredientId: idRemap.get(si.ingredientId) ?? si.ingredientId,
+            })),
+          };
+        }
+      }
+    }
+
     const recipeData = {
       title: title.trim(),
       description: description.trim(),
