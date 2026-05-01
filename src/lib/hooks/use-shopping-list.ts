@@ -24,10 +24,8 @@ import type {
 import type { OneOffMeta } from "@/lib/types/shopping-organization";
 import type { PlanInstance } from "@/lib/types/meal-plan";
 
-function itemKey(name: string, unit: string): string {
-  // Normalize the unit segment so legacy recipes with "grams" group with
-  // current recipes using "g". See src/lib/unit-standards.ts.
-  return `${name.trim().toLowerCase()}|${normalizeUnit(unit)}`;
+function itemKey(name: string): string {
+  return name.trim().toLowerCase();
 }
 
 /**
@@ -97,18 +95,43 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     }
   >();
 
-  function addIngredients(recipeId: string, multiplier: number) {
+  function addIngredients(recipeId: string, multiplier: number, visited?: Set<string>) {
+    const _visited = visited ?? new Set<string>();
+    if (_visited.has(recipeId)) return; // prevent infinite cycles
+    _visited.add(recipeId);
+
     const recipe = recipesMap.get(recipeId);
     if (!recipe || multiplier <= 0) return;
     for (const ing of recipe.ingredients) {
-      const key = itemKey(ing.name, ing.unit);
-      const scaledQty = ing.quantity !== null ? ing.quantity * multiplier : null;
       const linkedLib = libraryMap.get(ing.id) ?? null;
+
+      // If the ingredient id resolves to another recipe (a sub-meal added from
+      // the food tracking app), expand it recursively instead of listing it as
+      // a single shopping item.
+      if (!linkedLib) {
+        const subRecipe = recipesMap.get(ing.id);
+        if (subRecipe) {
+          const servingsUsed = ing.quantity ?? 1;
+          const subScaling = (servingsUsed / (subRecipe.servings || 1)) * multiplier;
+          addIngredients(subRecipe.id, subScaling, _visited);
+          continue;
+        }
+      }
+
+      const key = itemKey(ing.name);
+      const scaledQty = ing.quantity !== null ? ing.quantity * multiplier : null;
+      const normalizedUnit = normalizeUnit(ing.unit);
       const existing = merged.get(key);
       if (existing) {
-        if (scaledQty !== null && existing.quantity !== null) {
-          existing.quantity += scaledQty;
+        if (existing.unit === normalizedUnit) {
+          // Same unit — accumulate quantities
+          if (scaledQty !== null && existing.quantity !== null) {
+            existing.quantity += scaledQty;
+          } else {
+            existing.quantity = null;
+          }
         } else {
+          // Different units — can't sum; leave quantity indeterminate
           existing.quantity = null;
         }
         // Prefer the first linked library item we encounter for metadata
@@ -126,7 +149,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
         merged.set(key, {
           name: ing.name,
           quantity: scaledQty,
-          unit: normalizeUnit(ing.unit),
+          unit: normalizedUnit,
           category: ing.category,
           isLinked: !!linkedLib,
           linkedLibraryItem: linkedLib,
@@ -140,7 +163,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
   function addPantryItem(libraryId: string) {
     const lib = libraryMap.get(libraryId);
     if (!lib) return;
-    const key = itemKey(lib.name, lib.servingUnit ?? "");
+    const key = itemKey(lib.name);
     const existing = merged.get(key);
     if (existing) {
       // Already coming from a recipe — just flag pantry origin too
