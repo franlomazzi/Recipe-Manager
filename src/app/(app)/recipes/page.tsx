@@ -101,7 +101,7 @@ export default function RecipesPage() {
                     <h3 className="font-semibold text-xs line-clamp-1">{recipe.title}</h3>
                     <div className="flex items-center gap-1 shrink-0">
                       {recipe.userId !== user?.uid && (
-                        <Users className="h-3 w-3 text-muted-foreground" title="Shared with you" />
+                        <Users className="h-3 w-3 text-muted-foreground" aria-label="Shared with you" />
                       )}
                       {recipe.isFavorite && (
                         <Heart className="h-3 w-3 fill-primary text-primary mt-px" />
@@ -242,7 +242,7 @@ function KitchenToolRecipes({
                   </h3>
                   <div className="flex items-center gap-1.5 shrink-0 mt-1">
                     {r.userId !== uid && (
-                      <Users className="h-3.5 w-3.5 text-muted-foreground" title="Shared with you" />
+                      <Users className="h-3.5 w-3.5 text-muted-foreground" aria-label="Shared with you" />
                     )}
                     {r.isFavorite && (
                       <Heart className="h-3.5 w-3.5 fill-primary text-primary" />
@@ -285,7 +285,7 @@ function KitchenToolRecipes({
             >
               <div className="flex items-center gap-3 min-w-0">
                 {r.isFavorite && <Heart className="h-3 w-3 shrink-0 fill-primary text-primary" />}
-                {r.userId !== uid && <Users className="h-3 w-3 shrink-0 text-muted-foreground" title="Shared with you" />}
+                {r.userId !== uid && <Users className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Shared with you" />}
                 <span className="kt-serif text-base font-medium truncate">{r.title}</span>
               </div>
               <div className="text-right kt-mono text-xs text-muted-foreground">{r.totalTime}m</div>
