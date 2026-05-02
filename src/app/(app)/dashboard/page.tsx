@@ -1,16 +1,26 @@
 "use client";
 
+import { useState } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, CalendarDays, ChefHat, Plus, ShoppingCart } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ImportRecipeModal } from "@/components/recipe/import-recipe-modal";
+import { BookOpen, CalendarDays, ChefHat, Download, Plus, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const isKT = useKitchenTool();
   const firstName = user?.displayName?.split(" ")[0] || "Chef";
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   if (isKT) return <KitchenToolDashboard firstName={firstName} />;
 
@@ -26,19 +36,57 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Link href="/recipes/new">
-          <Card className="card-elevated cursor-pointer transition-all hover:scale-[1.02] border-transparent">
-            <CardHeader className="flex flex-row items-center gap-4 space-y-0 pb-2">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
-                <Plus className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-base">New Recipe</CardTitle>
-                <CardDescription className="text-xs mt-0.5">Add a new recipe to your collection</CardDescription>
-              </div>
-            </CardHeader>
-          </Card>
-        </Link>
+        <Card
+          className="card-elevated cursor-pointer transition-all hover:scale-[1.02] border-transparent"
+          onClick={() => setChoiceOpen(true)}
+        >
+          <CardHeader className="flex flex-row items-center gap-4 space-y-0 pb-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
+              <Plus className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-base">New Recipe</CardTitle>
+              <CardDescription className="text-xs mt-0.5">Add a new recipe to your collection</CardDescription>
+            </div>
+          </CardHeader>
+        </Card>
+
+        <Dialog open={choiceOpen} onOpenChange={setChoiceOpen}>
+          <DialogContent className="sm:max-w-xs">
+            <DialogHeader>
+              <DialogTitle>Add a Recipe</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-3 pt-2">
+              <Button
+                className="w-full justify-start gap-3 h-auto py-3 rounded-xl"
+                variant="outline"
+                render={<Link href="/recipes/new" onClick={() => setChoiceOpen(false)} />}
+              >
+                <Plus className="h-5 w-5 text-primary shrink-0" />
+                <div className="text-left">
+                  <div className="font-medium">From scratch</div>
+                  <div className="text-xs text-muted-foreground">Fill in the details manually</div>
+                </div>
+              </Button>
+              <Button
+                className="w-full justify-start gap-3 h-auto py-3 rounded-xl"
+                variant="outline"
+                onClick={() => {
+                  setChoiceOpen(false);
+                  setImportOpen(true);
+                }}
+              >
+                <Download className="h-5 w-5 text-primary shrink-0" />
+                <div className="text-left">
+                  <div className="font-medium">Import</div>
+                  <div className="text-xs text-muted-foreground">From URL, text, YouTube, or image</div>
+                </div>
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <ImportRecipeModal open={importOpen} onOpenChange={setImportOpen} />
 
         <Link href="/recipes">
           <Card className="card-elevated cursor-pointer transition-all hover:scale-[1.02] border-transparent">
