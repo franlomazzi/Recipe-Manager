@@ -67,9 +67,16 @@ function readFileAsBase64(file: File): Promise<string> {
 
 const LANG_NAMES: Record<"en" | "es", string> = { en: "English", es: "Spanish" };
 
-export function ImportRecipeModal() {
+interface ImportRecipeModalProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function ImportRecipeModal({ open: controlledOpen, onOpenChange }: ImportRecipeModalProps = {}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
   const [text, setText] = useState("");
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [pageUrl, setPageUrl] = useState("");
@@ -88,10 +95,15 @@ export function ImportRecipeModal() {
     setPendingDraft(null);
   }
 
+  function closeModal() {
+    if (isControlled) onOpenChange?.(false);
+    else setInternalOpen(false);
+  }
+
   // Final step: stash the draft and navigate to the review form.
   function proceed(draft: DraftRecipe) {
     stashImportDraft(draft);
-    setOpen(false);
+    closeModal();
     resetForm();
     router.push("/recipes/new?from=import");
   }
@@ -189,18 +201,24 @@ export function ImportRecipeModal() {
     <Dialog
       open={open}
       onOpenChange={(v) => {
-        setOpen(v);
+        if (isControlled) {
+          onOpenChange?.(v);
+        } else {
+          setInternalOpen(v);
+        }
         if (!v) resetForm();
       }}
     >
-      <DialogTrigger
-        render={
-          <Button variant="outline" className="rounded-xl">
-            <Download className="mr-2 h-4 w-4" />
-            Import
-          </Button>
-        }
-      />
+      {!isControlled && (
+        <DialogTrigger
+          render={
+            <Button variant="outline" className="rounded-xl">
+              <Download className="mr-2 h-4 w-4" />
+              Import
+            </Button>
+          }
+        />
+      )}
       <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -279,7 +297,7 @@ export function ImportRecipeModal() {
               <div className="flex justify-end gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() => setOpen(false)}
+                  onClick={() => closeModal()}
                   disabled={loading}
                 >
                   Cancel
@@ -315,7 +333,7 @@ export function ImportRecipeModal() {
               <div className="flex justify-end gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() => setOpen(false)}
+                  onClick={() => closeModal()}
                   disabled={loading}
                 >
                   Cancel
@@ -351,7 +369,7 @@ export function ImportRecipeModal() {
               <div className="flex justify-end gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() => setOpen(false)}
+                  onClick={() => closeModal()}
                   disabled={loading}
                 >
                   Cancel
@@ -408,7 +426,7 @@ export function ImportRecipeModal() {
               <div className="flex justify-end gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() => setOpen(false)}
+                  onClick={() => closeModal()}
                   disabled={loading}
                 >
                   Cancel
