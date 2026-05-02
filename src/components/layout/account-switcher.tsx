@@ -48,7 +48,7 @@ export function AccountSwitcher() {
           {initialsOf(active?.displayName, active?.email)}
         </AvatarFallback>
       </Avatar>
-      <span className="text-xs max-w-[80px] truncate">
+      <span className="text-xs">
         {active?.displayName ?? active?.email ?? "Account"}
       </span>
     </Button>
