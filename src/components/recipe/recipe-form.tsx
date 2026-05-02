@@ -1156,59 +1156,41 @@ export function RecipeForm({
       });
 
       const byStepId = new Map(mappings.map((m) => [m.stepId, m.ingredients]));
+      let timerCount = 0;
       setSteps((prev) =>
         prev.map((s) => {
           const mapped = byStepId.get(s.id);
-          if (!mapped) return { ...s, ingredients: [] };
-          return { ...s, ingredients: mapped };
+          const withIngredients = mapped
+            ? { ...s, ingredients: mapped }
+            : { ...s, ingredients: [] };
+          if (!withIngredients.timerMinutes) {
+            const detected = detectTimer(withIngredients.instruction ?? "");
+            if (detected) {
+              timerCount++;
+              return { ...withIngredients, timerMinutes: detected.minutes, timerLabel: detected.label };
+            }
+          }
+          return withIngredients;
         })
       );
       const mappedCount = mappings.reduce(
         (sum, m) => sum + m.ingredients.length,
         0
       );
-      toast.success(
-        mappedCount > 0
-          ? `Mapped ${mappedCount} ingredient${mappedCount === 1 ? "" : "s"} across ${mappings.length} step${mappings.length === 1 ? "" : "s"}.`
-          : "AI couldn't confidently map any ingredients — review the steps and try again."
-      );
+      const parts = [];
+      if (mappedCount > 0)
+        parts.push(`Mapped ${mappedCount} ingredient${mappedCount === 1 ? "" : "s"} across ${mappings.length} step${mappings.length === 1 ? "" : "s"}`);
+      else
+        parts.push("AI couldn't confidently map any ingredients — review the steps and try again");
+      if (timerCount > 0)
+        parts.push(`detected ${timerCount} timer${timerCount === 1 ? "" : "s"}`);
+      toast.success(parts.join(", ") + ".");
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "AI mapping failed."
       );
     } finally {
       setMappingSteps(false);
-    }
-  }
-
-  // Run the regex timer detector across every step that currently has no
-  // timer set. Used by the "Auto-detect timers" button so saved recipes
-  // predating AI-defined timers (or steps the import path missed) can be
-  // bulk-enriched in one click. Won't overwrite manually-set timers — if the
-  // user deliberately removed one in the past, they're safe from re-adding.
-  function handleAutoDetectTimers() {
-    let filledCount = 0;
-    setSteps((prev) =>
-      prev.map((s) => {
-        if (s.timerMinutes !== null && s.timerMinutes !== undefined) return s;
-        const detected = detectTimer(s.instruction ?? "");
-        if (!detected) return s;
-        filledCount += 1;
-        return {
-          ...s,
-          timerMinutes: detected.minutes,
-          timerLabel: detected.label,
-        };
-      })
-    );
-    if (filledCount === 0) {
-      toast.info(
-        "No new timers detected. Steps either already have timers or don't mention an explicit duration."
-      );
-    } else {
-      toast.success(
-        `Added ${filledCount} timer${filledCount === 1 ? "" : "s"}. Review and adjust before saving.`
-      );
     }
   }
 
@@ -1727,19 +1709,7 @@ export function RecipeForm({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle>Instructions</CardTitle>
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAutoDetectTimers}
-                disabled={!steps.some((s) => s.instruction.trim())}
-                className="gap-1.5"
-                title="Scan each step for phrases like 'for 10 minutes' and fill in the timer automatically. Won't overwrite existing timers."
-              >
-                <Clock className="h-4 w-4 text-primary" />
-                Auto-detect timers
-              </Button>
-              <Button
+<Button
                 type="button"
                 variant="outline"
                 size="sm"
