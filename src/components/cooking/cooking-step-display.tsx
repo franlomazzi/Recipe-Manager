@@ -402,7 +402,11 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-6 md:px-12 lg:px-16 overflow-y-auto">
+      <div className="flex flex-1 flex-col overflow-y-auto">
+        <div className={cn(
+          "flex flex-1 flex-col items-center px-6 py-6 md:px-12 lg:px-16",
+          viewMode === "focus" || isOnIngredientsStep ? "justify-center" : "justify-start"
+        )}>
         {isOnIngredientsStep ? (
           /* ── Ingredients step ── */
           <div className="w-full max-w-lg">
@@ -712,6 +716,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
             );
           })()
         )}
+        </div>
       </div>
 
       {/* Navigation */}
