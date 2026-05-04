@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useHousehold } from "@/lib/contexts/household-context";
@@ -26,7 +26,14 @@ import {
   addPantryItemId,
   removePantryItemId,
 } from "@/lib/firebase/household-pantry";
-import { usePantryItems } from "@/lib/hooks/use-pantry-items";
+import {
+  addIndividualPantryItemId,
+  removeIndividualPantryItemId,
+  setIndividualPantryCheckedForWeek,
+  commitIndividualPantryForWeek,
+  reopenIndividualPantryForWeek,
+} from "@/lib/firebase/shopping-list";
+import { usePantryItems, type PantryScope, type PantryItem } from "@/lib/hooks/use-pantry-items";
 import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
 import type { LibraryIngredient } from "@/lib/types/recipe";
 import { Button } from "@/components/ui/button";
@@ -89,7 +96,7 @@ const UNASSIGNED = "__unassigned__";
 export default function ShoppingListPage() {
   const { user } = useAuth();
   const isKT = useKitchenTool();
-  const { householdId } = useHousehold();
+  const { householdId, partnerUid } = useHousehold();
   const { instance } = useActivePlan();
   const { adhocWeeks } = useAdhocWeek();
   const { locations, categories } = useShoppingOrganization();
@@ -152,11 +159,17 @@ export default function ShoppingListPage() {
     pantryCheckedIds,
     pantryProcessed,
     sharedPantryCheckedByWeek,
+    individualPantryItemIds,
+    individualPantryCheckedByWeek,
+    individualPantryAddedByWeek,
+    individualPantryProcessedByWeek,
+    individualPantryCheckedIds,
+    individualPantryProcessed,
     loading,
     hasActivePlan,
   } = useShoppingList(weekIndex, effectiveInstance);
 
-  const { pantryItems } = usePantryItems();
+  const { pantryItems } = usePantryItems(individualPantryItemIds);
   const { items: libraryItems } = useIngredientLibrary();
 
   const [groupBy, setGroupBy] = useState<GroupBy>("category");
@@ -166,7 +179,14 @@ export default function ShoppingListPage() {
   const [assigning, setAssigning] = useState<ShoppingItem | null>(null);
   const [editPantryOpen, setEditPantryOpen] = useState(false);
   const [pantryNewName, setPantryNewName] = useState("");
-  const [pantryAssigning, setPantryAssigning] = useState<LibraryIngredient | null>(null);
+  const [pantryAssigning, setPantryAssigning] = useState<PantryItem | null>(null);
+  // Pending scope selection when a partner exists: holds the item to add until
+  // the user picks Household or Individual.
+  const [pendingAdd, setPendingAdd] = useState<{
+    name: string;
+    existing?: LibraryIngredient;
+  } | null>(null);
+  const [pendingScope, setPendingScope] = useState<PantryScope>("household");
 
   const weekRange = useMemo(() => {
     const start = addDays(calendarWeekMeta.firstMonday, weekIndex * 7);
@@ -262,10 +282,10 @@ export default function ShoppingListPage() {
 
   async function handleToggle(key: string) {
     if (!user) return;
-    // Pantry-originated items are checked off in the shared household doc
-    // so the tick syncs live to the partner.
     const item = items.find((it) => it.key === key);
-    if (item?.fromPantry && householdId) {
+    // Household pantry items tick against the shared household doc so both
+    // partners see the update live. Individual and recipe items use personal state.
+    if (item?.fromPantry && item.pantryShared && householdId) {
       await toggleSharedPantryCheckedKey(
         householdId,
         weekKey,
@@ -378,66 +398,85 @@ export default function ShoppingListPage() {
   }
 
   // ----- Pantry helpers -----
-  async function handleTogglePantry(libraryId: string) {
-    if (!householdId) return;
-    const next = pantryCheckedIds.includes(libraryId)
-      ? pantryCheckedIds.filter((id) => id !== libraryId)
-      : [...pantryCheckedIds, libraryId];
-    await setPantryCheckedForWeek(
-      householdId,
-      weekKey,
-      next,
-      pantryCheckedByWeek
-    );
+  async function handleTogglePantry(libraryId: string, scope: PantryScope) {
+    if (scope === "household") {
+      if (!householdId) return;
+      const next = pantryCheckedIds.includes(libraryId)
+        ? pantryCheckedIds.filter((id) => id !== libraryId)
+        : [...pantryCheckedIds, libraryId];
+      await setPantryCheckedForWeek(householdId, weekKey, next, pantryCheckedByWeek);
+    } else {
+      if (!user) return;
+      const next = individualPantryCheckedIds.includes(libraryId)
+        ? individualPantryCheckedIds.filter((id) => id !== libraryId)
+        : [...individualPantryCheckedIds, libraryId];
+      await setIndividualPantryCheckedForWeek(user.uid, weekKey, next);
+    }
   }
 
   async function handleCommitPantry() {
-    if (!householdId) return;
-    // Items NOT checked are the ones that need shopping
-    const toAdd = pantryItems
-      .filter((p) => !pantryCheckedIds.includes(p.id))
+    if (!householdId || !user) return;
+    const householdToAdd = pantryItems
+      .filter((p) => p.scope === "household" && !pantryCheckedIds.includes(p.id))
       .map((p) => p.id);
-    await commitPantryForWeek(
-      householdId,
-      weekKey,
-      toAdd,
-      pantryAddedByWeek,
-      pantryProcessedByWeek
-    );
+    const individualToAdd = pantryItems
+      .filter((p) => p.scope === "individual" && !individualPantryCheckedIds.includes(p.id))
+      .map((p) => p.id);
+    await Promise.all([
+      commitPantryForWeek(householdId, weekKey, householdToAdd, pantryAddedByWeek, pantryProcessedByWeek),
+      commitIndividualPantryForWeek(user.uid, weekKey, individualToAdd),
+    ]);
+    const total = householdToAdd.length + individualToAdd.length;
     toast.success(
-      toAdd.length
-        ? `Added ${toAdd.length} pantry item${toAdd.length === 1 ? "" : "s"}`
-        : "Pantry check complete"
+      total ? `Added ${total} pantry item${total === 1 ? "" : "s"}` : "Pantry check complete"
     );
   }
 
   async function handleReopenPantry() {
-    if (!householdId) return;
-    await reopenPantryForWeek(householdId, weekKey, pantryProcessedByWeek);
+    if (!householdId || !user) return;
+    await Promise.all([
+      reopenPantryForWeek(householdId, weekKey, pantryProcessedByWeek),
+      reopenIndividualPantryForWeek(user.uid, weekKey),
+    ]);
   }
 
-  async function handleRemoveFromPantry(libraryId: string) {
-    if (!householdId) return;
-    await removePantryItemId(
-      householdId,
-      pantryItems.map((p) => p.id),
-      libraryId
-    );
+  async function handleRemoveFromPantry(libraryId: string, scope: PantryScope) {
+    if (!user) return;
+    if (scope === "household") {
+      if (!householdId) return;
+      await removePantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), libraryId);
+    } else {
+      await removeIndividualPantryItemId(user.uid, individualPantryItemIds, libraryId);
+    }
+    // Clear the isPantryItem flag only if no pantry list still holds this item.
+    const item = pantryItems.find((p) => p.id === libraryId);
+    const stillInOtherScope = pantryItems.some((p) => p.id === libraryId && p.scope !== scope);
+    if (!stillInOtherScope && item?.userId === user.uid) {
+      await updateLibraryIngredient(user.uid, libraryId, { isPantryItem: false });
+    }
   }
 
-  async function handleAddPantryItem(existing?: LibraryIngredient) {
+  async function handleChangePantryScope(libraryId: string, from: PantryScope, to: PantryScope) {
+    if (from === to || !householdId || !user) return;
+    if (to === "household") {
+      await removeIndividualPantryItemId(user.uid, individualPantryItemIds, libraryId);
+      await addPantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), libraryId);
+    } else {
+      await removePantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), libraryId);
+      await addIndividualPantryItemId(user.uid, individualPantryItemIds, libraryId);
+    }
+  }
+
+  async function commitAddPantryItem(
+    existing: LibraryIngredient | undefined,
+    name: string,
+    scope: PantryScope
+  ) {
     if (!user || !householdId) return;
-    const name = pantryNewName.trim();
-    if (!existing && !name) return;
-
     const pantryIdSet = new Set(pantryItems.map((p) => p.id));
-    // If an existing library match wasn't passed, look one up by name so typing
-    // a name that matches an ingredient already in recipes reuses it.
     const match =
       existing ??
-      libraryItems.find(
-        (i) => i.name.trim().toLowerCase() === name.toLowerCase()
-      );
+      libraryItems.find((i) => i.name.trim().toLowerCase() === name.toLowerCase());
 
     if (match) {
       if (pantryIdSet.has(match.id)) {
@@ -446,19 +485,43 @@ export default function ShoppingListPage() {
         return;
       }
       if (!match.isPantryItem) {
-        await updateLibraryIngredient(user.uid, match.id, {
-          isPantryItem: true,
-        });
+        await updateLibraryIngredient(user.uid, match.id, { isPantryItem: true });
       }
-      await addPantryItemId(householdId, pantryItems.map((p) => p.id), match.id);
+      if (scope === "household") {
+        await addPantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), match.id);
+      } else {
+        await addIndividualPantryItemId(user.uid, individualPantryItemIds, match.id);
+      }
       toast.success(`Added ${match.name} from your ingredient library`);
       setPantryNewName("");
       return;
     }
 
     const newId = await createPantryLibraryIngredient(user.uid, name);
-    await addPantryItemId(householdId, pantryItems.map((p) => p.id), newId);
+    if (scope === "household") {
+      await addPantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), newId);
+    } else {
+      await addIndividualPantryItemId(user.uid, individualPantryItemIds, newId);
+    }
     setPantryNewName("");
+  }
+
+  function handleAddPantryItem(existing?: LibraryIngredient) {
+    const name = pantryNewName.trim();
+    if (!existing && !name) return;
+    if (partnerUid) {
+      // Ask the user to pick a scope before committing.
+      setPendingAdd({ name, existing });
+      setPendingScope("household");
+    } else {
+      void commitAddPantryItem(existing, name, "household");
+    }
+  }
+
+  async function confirmPendingAdd() {
+    if (!pendingAdd) return;
+    await commitAddPantryItem(pendingAdd.existing, pendingAdd.name, pendingScope);
+    setPendingAdd(null);
   }
 
   const pantryAssignItem = useMemo(() => {
@@ -473,6 +536,7 @@ export default function ShoppingListPage() {
       note: pantryAssigning.shoppingNote ?? null,
       price: pantryAssigning.shoppingPrice ?? null,
       libraryId: pantryAssigning.id,
+      scope: pantryAssigning.scope,
     };
   }, [pantryAssigning]);
 
@@ -1021,10 +1085,10 @@ export default function ShoppingListPage() {
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
             <Package className="h-3 w-3" />
-            Pantry &amp; household check
+            Pantry check
             {!pantryProcessed && pantryItems.length > 0 && (
               <span className="text-muted-foreground/50 font-normal normal-case">
-                ({pantryItems.length - pantryCheckedIds.length} need shopping)
+                ({pantryItems.length - pantryCheckedIds.length - individualPantryCheckedIds.length} need shopping)
               </span>
             )}
           </h3>
@@ -1074,23 +1138,41 @@ export default function ShoppingListPage() {
               </div>
               <div className="divide-y">
                 {pantryItems.map((p) => {
-                  const skip = pantryCheckedIds.includes(p.id);
+                  const skip =
+                    p.scope === "household"
+                      ? pantryCheckedIds.includes(p.id)
+                      : individualPantryCheckedIds.includes(p.id);
                   return (
                     <div
-                      key={p.id}
+                      key={`${p.scope}:${p.id}`}
                       className="flex items-center gap-3 px-4 py-2.5"
                     >
                       <Checkbox
                         checked={skip}
-                        onCheckedChange={() => handleTogglePantry(p.id)}
+                        onCheckedChange={() => handleTogglePantry(p.id, p.scope)}
                       />
-                      <span
-                        className={`flex-1 text-sm ${
-                          skip ? "line-through text-muted-foreground/60" : ""
-                        }`}
-                      >
-                        {p.name}
-                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span
+                          className={`text-sm ${
+                            skip ? "line-through text-muted-foreground/60" : ""
+                          }`}
+                        >
+                          {p.name}
+                        </span>
+                        {partnerUid && (
+                          <div className="mt-0.5">
+                            {p.scope === "household" ? (
+                              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800">
+                                Household
+                              </Badge>
+                            ) : (
+                              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700">
+                                Individual
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       {p.shoppingPrice !== null &&
                         p.shoppingPrice !== undefined && (
                           <span className="text-xs text-muted-foreground shrink-0">
@@ -1136,6 +1218,49 @@ export default function ShoppingListPage() {
             onPickExisting={(lib) => handleAddPantryItem(lib)}
           />
 
+          {/* Scope prompt — shown when user has a partner and just picked an item */}
+          {pendingAdd && partnerUid && (
+            <div className="rounded-lg border bg-muted/40 px-4 py-3 space-y-3">
+              <p className="text-xs font-medium">
+                Add &ldquo;{pendingAdd.existing?.name ?? pendingAdd.name}&rdquo; to:
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingScope("household")}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    pendingScope === "household"
+                      ? "border-violet-400 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-600"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Household
+                  <div className="text-[10px] font-normal mt-0.5 opacity-70">Shared with partner</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingScope("individual")}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    pendingScope === "individual"
+                      ? "border-slate-400 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Individual
+                  <div className="text-[10px] font-normal mt-0.5 opacity-70">Only visible to you</div>
+                </button>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setPendingAdd(null)}>
+                  Cancel
+                </Button>
+                <Button size="sm" className="h-7 px-3 text-xs rounded-lg" onClick={() => void confirmPendingAdd()}>
+                  Add
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="max-h-72 overflow-y-auto -mx-1">
             {pantryItems.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
@@ -1149,30 +1274,43 @@ export default function ShoppingListPage() {
                     : null;
                   return (
                     <div
-                      key={p.id}
+                      key={`${p.scope}:${p.id}`}
                       className="flex items-center gap-2 px-2 py-2"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="text-sm truncate">{p.name}</div>
-                        {loc && (
-                          <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                            <MapPin className="h-2.5 w-2.5" />
-                            {loc.name}
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {partnerUid && (
+                            p.scope === "household" ? (
+                              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800">
+                                Household
+                              </Badge>
+                            ) : (
+                              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700">
+                                Individual
+                              </Badge>
+                            )
+                          )}
+                          {loc && (
+                            <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                              <MapPin className="h-2.5 w-2.5" />
+                              {loc.name}
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <button
                         type="button"
                         className="text-muted-foreground/60 hover:text-foreground transition-colors p-1"
                         onClick={() => setPantryAssigning(p)}
-                        title="Assign store / category"
+                        title="Edit"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
                         className="text-muted-foreground/40 hover:text-destructive transition-colors p-1"
-                        onClick={() => handleRemoveFromPantry(p.id)}
+                        onClick={() => handleRemoveFromPantry(p.id, p.scope)}
                         title="Remove from pantry"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -1204,6 +1342,41 @@ export default function ShoppingListPage() {
         locations={locations}
         categories={categories}
         locationMap={locationMap}
+        scopeSection={(() => {
+          if (!pantryAssigning || !partnerUid) return undefined;
+          // Read the live scope from pantryItems rather than from pantryAssigning,
+          // so the toggle reflects Firestore state without mutating pantryAssigning
+          // (mutating it would change the item reference and reset the form).
+          const liveScope =
+            pantryItems.find((p) => p.id === pantryAssigning.id)?.scope ??
+            pantryAssigning.scope;
+          return (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Visibility</label>
+              <div className="flex gap-2">
+                {(["household", "individual"] as PantryScope[]).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => void handleChangePantryScope(pantryAssigning.id, liveScope, s)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      liveScope === s
+                        ? s === "household"
+                          ? "border-violet-400 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-600"
+                          : "border-slate-400 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {s === "household" ? "Household" : "Individual"}
+                    <div className="text-[10px] font-normal mt-0.5 opacity-70">
+                      {s === "household" ? "Shared with partner" : "Only visible to you"}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       />
 
       {/* Assign dialog */}
@@ -1260,10 +1433,23 @@ function ItemRow({
             {item.note}
           </p>
         )}
-        {item.sources.length > 0 && (
-          <p className="text-[10px] text-muted-foreground/60 truncate">
-            {item.sources.map((s) => s.recipeName).join(", ")}
-          </p>
+        {(item.fromPantry || item.sources.length > 0) && (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            {item.fromPantry ? (
+              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
+                Pantry
+              </Badge>
+            ) : (
+              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/20 dark:text-sky-400 dark:border-sky-800">
+                Plan
+              </Badge>
+            )}
+            {item.sources.length > 0 && (
+              <span className="text-[10px] text-muted-foreground/60 truncate">
+                {item.sources.map((s) => s.recipeName).join(", ")}
+              </span>
+            )}
+          </div>
         )}
       </div>
       <button
@@ -1296,6 +1482,7 @@ function AssignDialog<T extends AssignDialogItem>({
   locations,
   categories,
   locationMap,
+  scopeSection,
 }: {
   item: T | null;
   onClose: () => void;
@@ -1312,6 +1499,8 @@ function AssignDialog<T extends AssignDialogItem>({
   locations: import("@/lib/types/shopping-organization").ShoppingLocation[];
   categories: import("@/lib/types/shopping-organization").IngredientCategoryDef[];
   locationMap: Map<string, import("@/lib/types/shopping-organization").ShoppingLocation>;
+  /** Optional extra content rendered before the Save button — used for the pantry scope toggle */
+  scopeSection?: React.ReactNode;
 }) {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [locationId, setLocationId] = useState<string | null>(null);
@@ -1496,6 +1685,8 @@ function AssignDialog<T extends AssignDialogItem>({
                 </p>
               )}
             </div>
+
+            {scopeSection}
 
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="outline" size="sm" onClick={onClose}>

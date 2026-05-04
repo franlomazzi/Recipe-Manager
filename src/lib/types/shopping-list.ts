@@ -27,6 +27,8 @@ export interface ShoppingItem {
   price: number | null;
   /** Whether this item came from the pantry "Add to shopping list" flow */
   fromPantry: boolean;
+  /** When fromPantry is true: true = household (synced with partner), false = individual (this user only) */
+  pantryShared: boolean;
   checked: boolean;
   /** Which recipes contributed to this item */
   sources: { recipeId: string; recipeName: string }[];
@@ -59,6 +61,14 @@ export interface ShoppingListState {
   pantryAddedByWeek?: Record<string, string[]>;
   /** Per-week flag — true once the user has clicked "Add to shopping list" on the pantry section */
   pantryProcessedByWeek?: Record<string, boolean>;
+  /** Individual (non-shared) pantry item ids — only visible and managed by this user */
+  individualPantryItemIds?: string[];
+  /** Per-week "I have enough" checks for individual pantry items */
+  individualPantryCheckedByWeek?: Record<string, string[]>;
+  /** Per-week individual pantry items committed to the shopping list */
+  individualPantryAddedByWeek?: Record<string, string[]>;
+  /** Per-week flag — true once individual pantry items have been committed */
+  individualPantryProcessedByWeek?: Record<string, boolean>;
   updatedAt?: Timestamp;
 }
 

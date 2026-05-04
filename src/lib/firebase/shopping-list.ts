@@ -167,3 +167,59 @@ export async function migrateWeekKey(
 export async function clearAllChecked(userId: string) {
   await patchOrCreate(userId, { checkedKeys: [] });
 }
+
+// ─── Individual pantry helpers ────────────────────────────────────────────────
+
+export async function setIndividualPantryItemIds(
+  userId: string,
+  ids: string[]
+): Promise<void> {
+  await patchOrCreate(userId, { individualPantryItemIds: ids });
+}
+
+export async function addIndividualPantryItemId(
+  userId: string,
+  current: string[],
+  id: string
+): Promise<void> {
+  if (current.includes(id)) return;
+  await setIndividualPantryItemIds(userId, [...current, id]);
+}
+
+export async function removeIndividualPantryItemId(
+  userId: string,
+  current: string[],
+  id: string
+): Promise<void> {
+  await setIndividualPantryItemIds(userId, current.filter((x) => x !== id));
+}
+
+export async function setIndividualPantryCheckedForWeek(
+  userId: string,
+  weekKey: string,
+  checkedIds: string[]
+): Promise<void> {
+  await patchOrCreate(userId, {
+    [`individualPantryCheckedByWeek.${weekKey}`]: checkedIds,
+  });
+}
+
+export async function commitIndividualPantryForWeek(
+  userId: string,
+  weekKey: string,
+  addedIds: string[]
+): Promise<void> {
+  await patchOrCreate(userId, {
+    [`individualPantryAddedByWeek.${weekKey}`]: addedIds,
+    [`individualPantryProcessedByWeek.${weekKey}`]: true,
+  });
+}
+
+export async function reopenIndividualPantryForWeek(
+  userId: string,
+  weekKey: string
+): Promise<void> {
+  await patchOrCreate(userId, {
+    [`individualPantryProcessedByWeek.${weekKey}`]: deleteField(),
+  });
+}

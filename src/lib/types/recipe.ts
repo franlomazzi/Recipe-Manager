@@ -181,6 +181,7 @@ export interface CookLog {
 // Matches the food tracking app's FoodItem interface
 export interface LibraryIngredient {
   id: string;
+  userId?: string;
   name: string;
   brand?: string;
   servingSize: number;

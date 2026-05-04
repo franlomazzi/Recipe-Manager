@@ -56,8 +56,10 @@ function recipeOccurrencesForCalendarWeek(
 interface AggregateContext {
   planOccurrences: Map<string, number>;
   extras: ExtraRecipeEntry[];
-  /** Library ingredient ids that were committed via the pantry "Add to shopping list" flow */
+  /** Library ingredient ids committed via the household pantry "Add to shopping list" flow */
   pantryAddedIds: string[];
+  /** Library ingredient ids committed via the individual pantry "Add to shopping list" flow */
+  individualPantryAddedIds: string[];
   recipesMap: Map<string, Recipe>;
   libraryMap: Map<string, LibraryIngredient>;
   checkedKeys: Set<string>;
@@ -74,6 +76,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     planOccurrences,
     extras,
     pantryAddedIds,
+    individualPantryAddedIds,
     recipesMap,
     libraryMap,
     checkedKeys,
@@ -91,6 +94,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
       isLinked: boolean;
       linkedLibraryItem: LibraryIngredient | null;
       fromPantry: boolean;
+      pantryShared: boolean;
       sources: Map<string, { name: string; totalCount: number }>;
     }
   >();
@@ -154,36 +158,34 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
           isLinked: !!linkedLib,
           linkedLibraryItem: linkedLib,
           fromPantry: false,
+          pantryShared: false,
           sources: new Map([[recipeId, { name: recipe.title, totalCount: multiplier }]]),
         });
       }
     }
   }
 
-  function addPantryItem(libraryId: string) {
+  function addPantryItem(libraryId: string, shared: boolean) {
     const lib = libraryMap.get(libraryId);
     if (!lib) return;
-    const key = itemKey(lib.name);
-    const existing = merged.get(key);
-    if (existing) {
-      // Already coming from a recipe — just flag pantry origin too
-      existing.fromPantry = true;
-      if (!existing.linkedLibraryItem) {
-        existing.linkedLibraryItem = lib;
-        existing.isLinked = true;
-      }
-    } else {
-      merged.set(key, {
-        name: lib.name,
-        quantity: null,
-        unit: normalizeUnit(lib.servingUnit ?? ""),
-        category: "other",
-        isLinked: true,
-        linkedLibraryItem: lib,
-        fromPantry: true,
-        sources: new Map(),
-      });
-    }
+    // Pantry items always appear as a separate entry, even when the same
+    // ingredient is also needed by a recipe that week. The recipe entry shows
+    // how much you need for cooking; the pantry entry is a stock-up reminder.
+    // Use distinct prefixes so household and individual entries never collide.
+    const prefix = shared ? "pantry" : "ipantry";
+    const key = `${prefix}:${itemKey(lib.name)}`;
+    if (merged.has(key)) return;
+    merged.set(key, {
+      name: lib.name,
+      quantity: null,
+      unit: normalizeUnit(lib.servingUnit ?? ""),
+      category: "other",
+      isLinked: true,
+      linkedLibraryItem: lib,
+      fromPantry: true,
+      pantryShared: shared,
+      sources: new Map(),
+    });
   }
 
   for (const [recipeId, count] of planOccurrences) {
@@ -193,7 +195,10 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     addIngredients(entry.recipeId, entry.servingMultiplier);
   }
   for (const id of pantryAddedIds) {
-    addPantryItem(id);
+    addPantryItem(id, true);
+  }
+  for (const id of individualPantryAddedIds) {
+    addPantryItem(id, false);
   }
 
   return Array.from(merged.entries()).map(([key, val]) => {
@@ -212,11 +217,13 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
         ? oneOff.price
         : null;
 
-    // Pantry-originated items use the shared (household) checked-key set so
-    // ticks sync live between partners. Other items use the per-user set.
-    const checked = val.fromPantry
-      ? pantryCheckedKeys.has(key)
-      : checkedKeys.has(key);
+    // Household pantry items use the shared household checked-key set so ticks
+    // sync between partners. Individual pantry items and recipe items use the
+    // per-user personal set.
+    const checked =
+      val.fromPantry && val.pantryShared
+        ? pantryCheckedKeys.has(key)
+        : checkedKeys.has(key);
 
     return {
       key,
@@ -232,6 +239,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
       note: note && note.trim() ? note : null,
       price,
       fromPantry: val.fromPantry,
+      pantryShared: val.pantryShared,
       checked,
       sources: Array.from(val.sources.entries()).map(([id, info]) => ({
         recipeId: id,
@@ -315,7 +323,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     [state]
   );
 
-  // Pantry data — sourced from the household pantry state doc.
+  // Household pantry data — sourced from the household pantry state doc.
   const pantryAddedByWeek = pantryState.pantryAddedByWeek;
   const pantryCheckedByWeek = pantryState.pantryCheckedByWeek;
   const pantryProcessedByWeek = pantryState.pantryProcessedByWeek;
@@ -329,6 +337,34 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
   );
   const pantryProcessed =
     !!(pantryProcessedByWeek[weekKey] ?? pantryProcessedByWeek[legacyKey]);
+
+  // Individual pantry data — sourced from the user's own ShoppingListState doc.
+  const individualPantryItemIds = useMemo(
+    () => state?.individualPantryItemIds ?? [],
+    [state]
+  );
+  const individualPantryCheckedByWeek = useMemo(
+    () => state?.individualPantryCheckedByWeek ?? {},
+    [state]
+  );
+  const individualPantryAddedByWeek = useMemo(
+    () => state?.individualPantryAddedByWeek ?? {},
+    [state]
+  );
+  const individualPantryProcessedByWeek = useMemo(
+    () => state?.individualPantryProcessedByWeek ?? {},
+    [state]
+  );
+  const individualPantryAddedIds = useMemo(
+    () => individualPantryAddedByWeek[weekKey] ?? [],
+    [individualPantryAddedByWeek, weekKey]
+  );
+  const individualPantryCheckedIds = useMemo(
+    () => individualPantryCheckedByWeek[weekKey] ?? [],
+    [individualPantryCheckedByWeek, weekKey]
+  );
+  const individualPantryProcessed =
+    !!(individualPantryProcessedByWeek[weekKey]);
 
   const sharedPantryCheckedKeys = useMemo(
     () =>
@@ -372,6 +408,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
         planOccurrences,
         extras: extraEntries,
         pantryAddedIds,
+        individualPantryAddedIds,
         recipesMap,
         libraryMap,
         checkedKeys,
@@ -382,6 +419,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
       planOccurrences,
       extraEntries,
       pantryAddedIds,
+      individualPantryAddedIds,
       recipesMap,
       libraryMap,
       checkedKeys,
@@ -436,6 +474,13 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     pantryCheckedIds,
     pantryProcessed,
     sharedPantryCheckedByWeek: pantryState.pantryCheckedKeysByWeek,
+    individualPantryItemIds,
+    individualPantryCheckedByWeek,
+    individualPantryAddedByWeek,
+    individualPantryProcessedByWeek,
+    individualPantryAddedIds,
+    individualPantryCheckedIds,
+    individualPantryProcessed,
     loading,
     hasActivePlan: !!planInstance,
     instance: planInstance ?? null,
