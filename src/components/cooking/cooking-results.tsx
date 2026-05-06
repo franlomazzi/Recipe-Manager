@@ -17,6 +17,8 @@ import {
   Pencil,
   PartyPopper,
   StickyNote,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Recipe } from "@/lib/types/recipe";
@@ -25,6 +27,8 @@ interface CookingResultsProps {
   recipe: Recipe;
   servingsCooked: number;
   stepNotes?: Record<number, string>;
+  /** Elapsed milliseconds tracked during this session */
+  initialDurationMs?: number;
   onClose: () => void;
 }
 
@@ -40,6 +44,7 @@ export function CookingResults({
   recipe,
   servingsCooked,
   stepNotes,
+  initialDurationMs,
   onClose,
 }: CookingResultsProps) {
   const { user } = useAuth();
@@ -52,6 +57,22 @@ export function CookingResults({
   const [improvements, setImprovements] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  const initialMinutes =
+    initialDurationMs != null ? Math.round(initialDurationMs / 60000) : null;
+  const [durationMinutes, setDurationMinutes] = useState<string>(
+    initialMinutes != null ? String(initialMinutes) : ""
+  );
+
+  const parsedDuration = durationMinutes.trim() === "" ? null : parseInt(durationMinutes, 10);
+  const durationWarning =
+    parsedDuration !== null && !isNaN(parsedDuration)
+      ? parsedDuration < 2
+        ? "This seems very short — are you sure?"
+        : parsedDuration > 360
+        ? "This seems unusually long — you may have left the session running."
+        : null
+      : null;
 
   async function handleSave() {
     if (!user || rating === 0) {
@@ -71,6 +92,9 @@ export function CookingResults({
         improvements,
         appliedToVersion: null,
         cookedAt: Timestamp.now(),
+        ...(parsedDuration !== null && !isNaN(parsedDuration) && parsedDuration > 0
+          ? { durationMinutes: parsedDuration }
+          : {}),
       });
       toast.success("Cook log saved!");
       setSaved(true);
@@ -141,6 +165,37 @@ export function CookingResults({
                     {rating === 4 && "Great!"}
                     {rating === 5 && "Perfect!"}
                   </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Duration */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-primary" />
+                  Actual cook time
+                  <span className="ml-auto text-xs font-normal text-muted-foreground">optional</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min={1}
+                    max={600}
+                    placeholder="—"
+                    value={durationMinutes}
+                    onChange={(e) => setDurationMinutes(e.target.value)}
+                    className="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <span className="text-sm text-muted-foreground">minutes</span>
+                </div>
+                {durationWarning && (
+                  <div className="flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    {durationWarning}
+                  </div>
                 )}
               </CardContent>
             </Card>

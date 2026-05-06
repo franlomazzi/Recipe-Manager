@@ -88,6 +88,7 @@ export function firestoreDocToRecipe(
     forkedFromVersion: (data.forkedFromVersion as number) ?? null,
     rating: (data.rating as number) ?? null,
     cookCount: (data.cookCount as number) ?? 0,
+    averageDuration: (data.averageDuration as number) ?? null,
     householdShared: (data.householdShared as boolean) ?? false,
     ingredientExtensions: extensions,
     sourceUrl: (data.sourceUrl as string) ?? null,

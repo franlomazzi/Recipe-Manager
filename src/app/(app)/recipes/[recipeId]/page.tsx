@@ -62,6 +62,7 @@ import { useState, useEffect, useMemo } from "react";
 import { ImprovementSuggestions } from "@/components/recipe/improvement-suggestions";
 import { useCookingSession } from "@/lib/contexts/cooking-session-context";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
+import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { addRecipeToWeek, subscribeToShoppingListState } from "@/lib/firebase/shopping-list";
 import { isoWeekKey, isoWeekKeyForOffset } from "@/lib/utils/week-keys";
@@ -107,6 +108,7 @@ export default function RecipeDetailPage() {
   const [addingToShopping, setAddingToShopping] = useState(false);
 
   const { instance: activePlan } = useActivePlan();
+  const { items: libraryItems } = useIngredientLibrary();
   const [deletingVersion, setDeletingVersion] = useState<number | null>(null);
   const [versionsExpanded, setVersionsExpanded] = useState(false);
   const [previewVersion, setPreviewVersion] = useState<RecipeVersion | null>(null);
@@ -160,6 +162,42 @@ export default function RecipeDetailPage() {
     [shoppingListState]
   );
 
+  const libraryMap = useMemo(
+    () => new Map(libraryItems.map((li) => [li.id, li])),
+    [libraryItems]
+  );
+
+  /**
+   * Estimated cost for the recipe at the current serving multiplier.
+   * ingredient.id matches the library ingredient id (same linking used by the shopping list).
+   */
+  const recipeCost = useMemo(() => {
+    const ingredients = recipe?.ingredients ?? [];
+    let total = 0;
+    let priced = 0;
+    let unpriced = 0;
+    for (const ing of ingredients) {
+      const lib = libraryMap.get(ing.id);
+      const price = lib?.shoppingPrice ?? null;
+      const priceQty = lib?.shoppingPriceQty ?? null;
+      if (price !== null && ing.quantity !== null) {
+        if (priceQty !== null && priceQty > 0) {
+          total += ((ing.quantity * servingMultiplier) / priceQty) * price;
+          priced++;
+        } else if (priceQty === null) {
+          // Legacy: no priceQty — treat shoppingPrice as approximate item cost
+          total += price;
+          priced++;
+        } else {
+          unpriced++;
+        }
+      } else {
+        unpriced++;
+      }
+    }
+    return { total, priced, unpriced };
+  }, [recipe?.ingredients, libraryMap, servingMultiplier]);
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -211,6 +249,7 @@ export default function RecipeDetailPage() {
         addingToShopping={addingToShopping}
         handleAddToShoppingList={handleAddToShoppingList}
         router={router}
+        recipeCost={recipeCost}
       />
     );
   }
@@ -434,6 +473,12 @@ export default function RecipeDetailPage() {
               {recipe.prepTime > 0 && `${recipe.prepTime}m prep`}
               {recipe.prepTime > 0 && recipe.cookTime > 0 && " + "}
               {recipe.cookTime > 0 && `${recipe.cookTime}m cook`}
+            </span>
+          )}
+          {recipe.averageDuration != null && (
+            <span className="flex items-center gap-1 text-primary/80" title="Average actual cook time from your logs">
+              <Clock className="h-4 w-4" />
+              {recipe.averageDuration}m avg
             </span>
           )}
           <span className="flex items-center gap-1">
@@ -805,6 +850,7 @@ export default function RecipeDetailPage() {
                         <span className="text-xs text-muted-foreground">
                           {log.servingsCooked} {log.servingsCooked === 1 ? "serving" : "servings"}
                           {" · v"}{log.version}
+                          {log.durationMinutes != null && ` · ${log.durationMinutes}m`}
                         </span>
                       </div>
                       {log.notes && (
@@ -1013,6 +1059,14 @@ export default function RecipeDetailPage() {
         </SheetContent>
       </Sheet>
 
+      {/* Estimated cost — low-key, for reference only */}
+      {recipeCost.priced > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Estimated cost: ≈ ${recipeCost.total.toFixed(2)} for {adjustedServings} serving{adjustedServings === 1 ? "" : "s"}
+          {recipeCost.unpriced > 0 && ` · ${recipeCost.unpriced} ingredient${recipeCost.unpriced === 1 ? "" : "s"} without price`}
+        </p>
+      )}
+
       {/* Actions: Fork & Delete */}
       <div className="flex flex-wrap gap-3 pt-4">
         <Dialog>
@@ -1106,6 +1160,7 @@ type KTDetailProps = {
   addingToShopping: boolean;
   handleAddToShoppingList: () => void | Promise<void>;
   router: ReturnType<typeof useRouter>;
+  recipeCost: { total: number; priced: number; unpriced: number };
 };
 
 function KitchenToolRecipeDetail(props: KTDetailProps) {
@@ -1115,7 +1170,7 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
     cookLogs, showCookDialog, setShowCookDialog, cookServings, setCookServings,
     showShoppingDialog, setShowShoppingDialog, activePlan,
     shoppingWeekIndex, setShoppingWeekIndex, shoppingWeekRange, totalShoppingWeeks,
-    addingToShopping, handleAddToShoppingList, router,
+    addingToShopping, handleAddToShoppingList, router, recipeCost,
   } = props;
 
   const adjustedServings = recipe.servings * servingMultiplier;
@@ -1237,9 +1292,11 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
           </Button>
         </div>
 
-        {totalTime > 0 && (
+        {(totalTime > 0 || recipe.averageDuration != null) && (
           <div className="mt-3 text-xs text-muted-foreground kt-mono">
-            total {totalTime} min · {recipe.difficulty.toLowerCase()}
+            {totalTime > 0 && `total ${totalTime} min · `}
+            {recipe.averageDuration != null && `${recipe.averageDuration}m avg · `}
+            {recipe.difficulty.toLowerCase()}
             {(recipe.version ?? 1) > 1 && ` · v${recipe.version}`}
           </div>
         )}
@@ -1351,6 +1408,14 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
       )}
 
       <RecipeSourceLine url={recipe.sourceUrl ?? null} />
+
+      {/* Estimated cost — low-key */}
+      {recipeCost.priced > 0 && (
+        <p className="px-1 md:px-2 text-xs text-muted-foreground kt-mono">
+          est. cost ≈ ${recipeCost.total.toFixed(2)} · {adjustedServings} serving{adjustedServings === 1 ? "" : "s"}
+          {recipeCost.unpriced > 0 && ` · ${recipeCost.unpriced} unpriced`}
+        </p>
+      )}
 
       {/* Dialogs — reuse existing markup via minimal inline versions */}
       {showCookDialog && (

@@ -24,6 +24,10 @@ export interface CookingSession {
   stepNotes: Record<number, string>;
   /** stepId → scaled instruction text; undefined while fetch is in-flight or multiplier is 1 */
   scaledInstructions?: Record<string, string>;
+  /** Total milliseconds accumulated while the session timer was paused */
+  elapsedPausedMs: number;
+  /** Timestamp (ms) when the session timer was paused, null if running */
+  pausedAt: number | null;
 }
 
 export interface CookingSessionContextValue {
@@ -43,6 +47,8 @@ export interface CookingSessionContextValue {
   setStepNote: (recipeId: string, stepIndex: number, note: string) => void;
   appendStepNote: (recipeId: string, stepIndex: number, text: string) => void;
   setScaledInstructions: (recipeId: string, map: Record<string, string>) => void;
+  pauseSessionTimer: (recipeId: string) => void;
+  resumeSessionTimer: (recipeId: string) => void;
   isAnyCooking: boolean;
   persistentAlarm: boolean;
   setPersistentAlarm: (value: boolean) => void;

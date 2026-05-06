@@ -109,10 +109,14 @@ export default function RecipesPage() {
                     </div>
                   </div>
                   <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="flex items-center gap-0.5">
-                      <Clock className="h-3 w-3" />
-                      {recipe.totalTime} min
-                    </span>
+                    {(recipe.totalTime > 0 || recipe.averageDuration) && (
+                      <span className="flex items-center gap-0.5">
+                        <Clock className="h-3 w-3" />
+                        {recipe.totalTime > 0
+                          ? `${recipe.totalTime} min`
+                          : `${recipe.averageDuration} min avg`}
+                      </span>
+                    )}
                     <Badge variant="secondary" className="text-[10px] rounded-md px-1.5 py-0">
                       {recipe.difficulty}
                     </Badge>
@@ -250,11 +254,15 @@ function KitchenToolRecipes({
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground kt-mono">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {r.totalTime}m
-                  </span>
-                  <span className="opacity-60">·</span>
+                  {(r.totalTime > 0 || r.averageDuration) && (
+                    <>
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {r.totalTime > 0 ? `${r.totalTime}m` : `${r.averageDuration}m avg`}
+                      </span>
+                      <span className="opacity-60">·</span>
+                    </>
+                  )}
                   <span className="uppercase">{r.difficulty}</span>
                   {r.rating != null && (
                     <span className="ml-auto flex items-center gap-0.5">
@@ -288,7 +296,9 @@ function KitchenToolRecipes({
                 {r.userId !== uid && <Users className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Shared with you" />}
                 <span className="kt-serif text-base font-medium truncate">{r.title}</span>
               </div>
-              <div className="text-right kt-mono text-xs text-muted-foreground">{r.totalTime}m</div>
+              <div className="text-right kt-mono text-xs text-muted-foreground">
+                {r.totalTime > 0 ? `${r.totalTime}m` : r.averageDuration ? `${r.averageDuration}m` : "—"}
+              </div>
               <div className="text-right kt-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                 {r.difficulty}
               </div>

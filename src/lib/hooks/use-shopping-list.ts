@@ -210,12 +210,30 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     const sectionId = lib?.shoppingSectionId ?? oneOff?.sectionId ?? null;
     const categoryId = lib?.shoppingCategoryId ?? oneOff?.categoryId ?? null;
     const note = lib?.shoppingNote ?? oneOff?.note ?? null;
-    const price =
+    const rawPrice =
       typeof lib?.shoppingPrice === "number"
         ? lib.shoppingPrice
         : typeof oneOff?.price === "number"
         ? oneOff.price
         : null;
+
+    const priceQty =
+      typeof lib?.shoppingPriceQty === "number" ? lib.shoppingPriceQty : null;
+
+    // Compute proportional cost for this item's needed quantity.
+    // • New items: have both shoppingPrice + shoppingPriceQty → cost = (qty / priceQty) × price
+    // • Legacy items: only shoppingPrice, no priceQty → cost = price (old behaviour preserved)
+    // • Pantry items or items without quantity when priceQty is set → null (uncalculable)
+    let cost: number | null = null;
+    if (rawPrice !== null) {
+      if (priceQty !== null && priceQty > 0 && val.quantity !== null) {
+        cost = (val.quantity / priceQty) * rawPrice;
+      } else if (priceQty === null) {
+        // Legacy: no priceQty — treat shoppingPrice as the approximate item cost
+        cost = rawPrice;
+      }
+      // priceQty is set but quantity is null (pantry item) → cost stays null
+    }
 
     // Household pantry items use the shared household checked-key set so ticks
     // sync between partners. Individual pantry items and recipe items use the
@@ -237,7 +255,9 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
       sectionId,
       categoryId,
       note: note && note.trim() ? note : null,
-      price,
+      price: rawPrice,
+      priceQty,
+      cost,
       fromPantry: val.fromPantry,
       pantryShared: val.pantryShared,
       checked,

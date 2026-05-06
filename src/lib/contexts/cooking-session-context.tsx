@@ -23,6 +23,8 @@ type Action =
   | { type: "UPDATE_SESSION"; recipeId: string; updates: Partial<CookingSession> }
   | { type: "SET_STEP_NOTE"; recipeId: string; stepIndex: number; note: string }
   | { type: "APPEND_STEP_NOTE"; recipeId: string; stepIndex: number; text: string }
+  | { type: "PAUSE_SESSION_TIMER"; recipeId: string }
+  | { type: "RESUME_SESSION_TIMER"; recipeId: string }
   | { type: "START_TIMER"; timer: ActiveTimer }
   | { type: "PAUSE_TIMER"; timerId: string }
   | { type: "RESUME_TIMER"; timerId: string }
@@ -61,6 +63,8 @@ function reducer(state: State, action: Action): State {
             suggestionsDismissed: false,
             startedAt: Date.now(),
             stepNotes: {},
+            elapsedPausedMs: 0,
+            pausedAt: null,
           },
         ],
         activeSessionId: action.recipe.id,
@@ -124,6 +128,27 @@ function reducer(state: State, action: Action): State {
         }),
       };
     }
+    case "PAUSE_SESSION_TIMER":
+      return {
+        ...state,
+        sessions: state.sessions.map((s) =>
+          s.recipeId === action.recipeId && s.pausedAt === null
+            ? { ...s, pausedAt: Date.now() }
+            : s
+        ),
+      };
+    case "RESUME_SESSION_TIMER":
+      return {
+        ...state,
+        sessions: state.sessions.map((s) => {
+          if (s.recipeId !== action.recipeId || s.pausedAt === null) return s;
+          return {
+            ...s,
+            elapsedPausedMs: s.elapsedPausedMs + (Date.now() - s.pausedAt),
+            pausedAt: null,
+          };
+        }),
+      };
     case "START_TIMER":
       return { ...state, timers: [...state.timers, action.timer] };
     case "PAUSE_TIMER":
@@ -240,6 +265,17 @@ function reducer(state: State, action: Action): State {
     default:
       return state;
   }
+}
+
+export function computeSessionElapsedMs(
+  startedAt: number,
+  elapsedPausedMs: number,
+  pausedAt: number | null
+): number {
+  if (pausedAt !== null) {
+    return pausedAt - startedAt - elapsedPausedMs;
+  }
+  return Date.now() - startedAt - elapsedPausedMs;
 }
 
 const CookingSessionContext = createContext<CookingSessionContextValue | null>(
@@ -405,6 +441,14 @@ export function CookingSessionProvider({
     []
   );
 
+  const pauseSessionTimer = useCallback((recipeId: string) => {
+    dispatch({ type: "PAUSE_SESSION_TIMER", recipeId });
+  }, []);
+
+  const resumeSessionTimer = useCallback((recipeId: string) => {
+    dispatch({ type: "RESUME_SESSION_TIMER", recipeId });
+  }, []);
+
   const startTimer = useCallback(
     (
       timerData: Omit<ActiveTimer, "id" | "isRunning" | "isComplete">
@@ -480,6 +524,8 @@ export function CookingSessionProvider({
         resetTimer,
         adjustTimer,
         removeTimer,
+        pauseSessionTimer,
+        resumeSessionTimer,
         isAnyCooking: state.sessions.length > 0,
         persistentAlarm,
         setPersistentAlarm,

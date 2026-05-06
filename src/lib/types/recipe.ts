@@ -132,6 +132,8 @@ export interface Recipe {
   // Aggregate rating from cook logs
   rating: number | null;
   cookCount: number;
+  // Average actual cook duration in minutes, computed from cook logs with durationMinutes
+  averageDuration?: number | null;
   // Whether this recipe is shared with the household partner. Only the creator
   // (userId) can edit/delete; partner can view, log cooks, and fork.
   householdShared?: boolean;
@@ -173,6 +175,7 @@ export interface CookLog {
   notes: string; // General notes about how it went
   improvements: string; // Specific improvements for next time
   appliedToVersion: number | null; // If improvements were applied, which version
+  durationMinutes?: number; // Actual cook time tracked during this session
   cookedAt: Timestamp;
   createdAt: Timestamp;
 }
@@ -207,6 +210,8 @@ export interface LibraryIngredient {
   shoppingNote?: string | null;
   /** Approximate purchase price for this ingredient — currency-agnostic */
   shoppingPrice?: number | null;
+  /** Quantity purchased for `shoppingPrice`, in `servingUnit`. Used to compute proportional cost per recipe. */
+  shoppingPriceQty?: number | null;
   /** Whether this ingredient is part of the user's recurring pantry checklist */
   isPantryItem?: boolean;
   /**

@@ -21,8 +21,9 @@ import {
   StickyNote,
   Check,
 } from "lucide-react";
-import { useCookingSession } from "@/lib/contexts/cooking-session-context";
+import { useCookingSession, computeSessionElapsedMs } from "@/lib/contexts/cooking-session-context";
 import type { CookingSession } from "@/lib/types/cooking-session";
+import { SessionElapsedTimer } from "./session-elapsed-timer";
 import { cn } from "@/lib/utils";
 
 type ViewMode = "focus" | "split" | "grid" | "grid6" | "list";
@@ -183,6 +184,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
   const router = useRouter();
   const { updateSession, removeSession, setStepNote } = useCookingSession();
   const [showResults, setShowResults] = useState(false);
+  const [finalElapsedMs, setFinalElapsedMs] = useState<number | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeNoteStep, setActiveNoteStep] = useState<number | null>(null);
   // Ingredient check state for the ingredients step (local, not persisted)
@@ -323,6 +325,7 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
         recipe={recipe}
         servingsCooked={adjustedServings}
         stepNotes={stepNotes}
+        initialDurationMs={finalElapsedMs ?? undefined}
         onClose={() => {
           removeSession(recipe.id);
           router.push("/recipes");
@@ -339,8 +342,11 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
     >
       {/* Step indicator row */}
       <div className="flex items-center justify-between px-4 py-3 md:px-6">
-        <div className="text-sm text-muted-foreground">
-          <span className="font-medium">{adjustedServings}</span> servings
+        <div className="flex items-center gap-3">
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium">{adjustedServings}</span> servings
+          </div>
+          <SessionElapsedTimer recipeId={recipe.id} />
         </div>
 
         {!isOnIngredientsStep && (
@@ -735,7 +741,15 @@ export function CookingStepDisplay({ session }: CookingStepDisplayProps) {
         {isLast ? (
           <Button
             size="lg"
-            onClick={() => setShowResults(true)}
+            onClick={() => {
+              const elapsed = computeSessionElapsedMs(
+                session.startedAt,
+                session.elapsedPausedMs ?? 0,
+                session.pausedAt ?? null
+              );
+              setFinalElapsedMs(elapsed);
+              setShowResults(true);
+            }}
             className="min-w-[120px] md:min-w-[160px] md:h-12 md:text-base rounded-xl"
           >
             <ChefHat className="mr-2 h-4 w-4 md:h-5 md:w-5" />

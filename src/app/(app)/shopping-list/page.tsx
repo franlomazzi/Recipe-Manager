@@ -263,17 +263,38 @@ export default function ShoppingListPage() {
     items.filter((i) => i.checked).length +
     customItems.filter((i) => i.checked).length;
 
-  // Total cost across all (non-completed-aware — just reflects loaded prices)
+  // Total estimated cost broken down by origin.
+  // Recipe items use `cost` (proportional: qty/priceQty × price).
+  // Pantry items use `cost` when calculable, otherwise fall back to raw `price`
+  // (since a pantry item represents buying the full unit, not a scaled portion).
   const priceStats = useMemo(() => {
-    let total = 0;
-    let priced = 0;
+    let recipeTotal = 0;
+    let recipePriced = 0;
+    let pantryTotal = 0;
+    let pantryPriced = 0;
     for (const it of items) {
-      if (it.price !== null) {
-        total += it.price;
-        priced += 1;
+      if (it.fromPantry) {
+        const amt = it.cost ?? it.price; // cost first, raw price as fallback
+        if (amt !== null) {
+          pantryTotal += amt;
+          pantryPriced++;
+        }
+      } else {
+        if (it.cost !== null) {
+          recipeTotal += it.cost;
+          recipePriced++;
+        }
       }
     }
-    return { total, priced, totalCount: items.length };
+    return {
+      total: recipeTotal + pantryTotal,
+      totalPriced: recipePriced + pantryPriced,
+      totalCount: items.length,
+      recipeTotal,
+      recipePriced,
+      pantryTotal,
+      pantryPriced,
+    };
   }, [items]);
 
   const filteredAvailable = availableRecipes.filter((r) =>
@@ -363,6 +384,7 @@ export default function ShoppingListPage() {
       sectionId: string | null;
       note: string | null;
       price: number | null;
+      priceQty: number | null;
     }
   ) {
     if (!user) return;
@@ -374,8 +396,10 @@ export default function ShoppingListPage() {
           shoppingSectionId: next.sectionId,
           shoppingNote: next.note,
           shoppingPrice: next.price,
+          shoppingPriceQty: next.priceQty,
         });
       } else {
+        // One-off items: priceQty doesn't apply (no library ingredient to link quantities to)
         await setOneOffMeta(
           user.uid,
           weekKey,
@@ -529,12 +553,14 @@ export default function ShoppingListPage() {
     return {
       key: pantryAssigning.id,
       name: pantryAssigning.name,
+      unit: pantryAssigning.servingUnit ?? "",
       isLinked: true,
       categoryId: pantryAssigning.shoppingCategoryId ?? null,
       locationId: pantryAssigning.shoppingLocationId ?? null,
       sectionId: pantryAssigning.shoppingSectionId ?? null,
       note: pantryAssigning.shoppingNote ?? null,
       price: pantryAssigning.shoppingPrice ?? null,
+      priceQty: pantryAssigning.shoppingPriceQty ?? null,
       libraryId: pantryAssigning.id,
       scope: pantryAssigning.scope,
     };
@@ -548,6 +574,7 @@ export default function ShoppingListPage() {
       sectionId: string | null;
       note: string | null;
       price: number | null;
+      priceQty: number | null;
     }
   ) {
     if (!user) return;
@@ -558,6 +585,7 @@ export default function ShoppingListPage() {
         shoppingSectionId: next.sectionId,
         shoppingNote: next.note,
         shoppingPrice: next.price,
+        shoppingPriceQty: next.priceQty,
       });
       toast.success("Updated");
       setPantryAssigning(null);
@@ -664,15 +692,24 @@ export default function ShoppingListPage() {
               {checkedCount}/{totalItems} items checked
             </p>
           )}
-          {priceStats.priced > 0 && (
-            <p className="text-sm font-semibold text-primary mt-0.5">
-              Total ${priceStats.total.toFixed(2)}
-              {priceStats.priced < priceStats.totalCount && (
-                <span className="ml-1 text-xs font-normal text-muted-foreground">
-                  ({priceStats.priced} of {priceStats.totalCount} priced)
-                </span>
+          {priceStats.totalPriced > 0 && (
+            <div className="mt-0.5">
+              <p className="text-sm font-semibold text-primary">
+                Total ≈ ${priceStats.total.toFixed(2)}
+                {priceStats.totalPriced < priceStats.totalCount && (
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    ({priceStats.totalPriced} of {priceStats.totalCount} priced)
+                  </span>
+                )}
+              </p>
+              {priceStats.recipePriced > 0 && priceStats.pantryPriced > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Recipes ≈ ${priceStats.recipeTotal.toFixed(2)}
+                  {" · "}
+                  Pantry ${priceStats.pantryTotal.toFixed(2)}
+                </p>
               )}
-            </p>
+            </div>
           )}
         </div>
         <div className="flex gap-2">
@@ -1422,11 +1459,15 @@ function ItemRow({
               {item.unit}
             </span>
           ) : null}
-          {item.price !== null && (
+          {item.cost !== null ? (
             <span className="text-xs font-medium text-primary shrink-0 ml-auto">
+              ≈ ${item.cost.toFixed(2)}
+            </span>
+          ) : item.fromPantry && item.price !== null ? (
+            <span className="text-xs text-muted-foreground shrink-0 ml-auto">
               ${item.price.toFixed(2)}
             </span>
-          )}
+          ) : null}
         </div>
         {item.note && (
           <p className="text-[11px] text-muted-foreground/80 italic truncate">
@@ -1467,12 +1508,15 @@ function ItemRow({
 type AssignDialogItem = {
   key: string;
   name: string;
+  /** Ingredient unit — shown alongside the price-qty field for linked items */
+  unit: string;
   isLinked: boolean;
   categoryId: string | null;
   locationId: string | null;
   sectionId: string | null;
   note: string | null;
   price: number | null;
+  priceQty: number | null;
 };
 
 function AssignDialog<T extends AssignDialogItem>({
@@ -1494,6 +1538,7 @@ function AssignDialog<T extends AssignDialogItem>({
       sectionId: string | null;
       note: string | null;
       price: number | null;
+      priceQty: number | null;
     }
   ) => Promise<void>;
   locations: import("@/lib/types/shopping-organization").ShoppingLocation[];
@@ -1507,6 +1552,7 @@ function AssignDialog<T extends AssignDialogItem>({
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [priceInput, setPriceInput] = useState("");
+  const [priceQtyInput, setPriceQtyInput] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Reset on item change
@@ -1517,6 +1563,7 @@ function AssignDialog<T extends AssignDialogItem>({
       setSectionId(item.sectionId);
       setNote(item.note ?? "");
       setPriceInput(item.price !== null ? String(item.price) : "");
+      setPriceQtyInput(item.priceQty !== null ? String(item.priceQty) : "");
     }
   }, [item]);
 
@@ -1531,12 +1578,17 @@ function AssignDialog<T extends AssignDialogItem>({
         sectionId && sections.some((s) => s.id === sectionId) ? sectionId : null;
       const trimmedNote = note.trim();
       const parsedPrice = priceInput.trim() ? Number(priceInput) : NaN;
+      const parsedPriceQty = priceQtyInput.trim() ? Number(priceQtyInput) : NaN;
       await onSave(item, {
         categoryId,
         locationId,
         sectionId: validSection,
         note: trimmedNote ? trimmedNote : null,
         price: Number.isFinite(parsedPrice) ? parsedPrice : null,
+        priceQty:
+          Number.isFinite(parsedPriceQty) && parsedPriceQty > 0
+            ? parsedPriceQty
+            : null,
       });
     } finally {
       setSaving(false);
@@ -1664,26 +1716,45 @@ function AssignDialog<T extends AssignDialogItem>({
 
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
-                Approximate price
+                Purchase price
               </label>
-              <Input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
-                value={priceInput}
-                onChange={(e) => setPriceInput(e.target.value)}
-                placeholder="0.00"
-              />
-              {item.isLinked ? (
-                <p className="text-[10px] text-muted-foreground">
-                  Saved globally for this ingredient.
-                </p>
-              ) : (
-                <p className="text-[10px] text-muted-foreground">
-                  Saved as a one-off for this week only.
-                </p>
-              )}
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  value={priceInput}
+                  onChange={(e) => setPriceInput(e.target.value)}
+                  placeholder="0.00"
+                  className={item.isLinked ? "flex-1" : ""}
+                />
+                {item.isLinked && (
+                  <>
+                    <span className="text-xs text-muted-foreground shrink-0">for</span>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      step="any"
+                      min="0"
+                      value={priceQtyInput}
+                      onChange={(e) => setPriceQtyInput(e.target.value)}
+                      placeholder="qty"
+                      className="w-24"
+                    />
+                    {item.unit && (
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {item.unit}
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                {item.isLinked
+                  ? "e.g. $2.00 for 500 g — used to estimate cost per recipe. Saved globally."
+                  : "Saved as a one-off for this week only."}
+              </p>
             </div>
 
             {scopeSection}

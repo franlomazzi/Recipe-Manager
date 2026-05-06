@@ -23,8 +23,16 @@ export interface ShoppingItem {
   categoryId: string | null;
   /** Note shown under the item (from library or one-off) */
   note: string | null;
-  /** Approximate purchase price (from library) */
+  /** Approximate purchase price (from library) — raw, for use in the edit dialog */
   price: number | null;
+  /** Purchase quantity paired with `price`, in the ingredient's unit */
+  priceQty: number | null;
+  /**
+   * Proportional cost for this week's needed quantity: `(quantity / priceQty) × price`.
+   * Falls back to `price` for legacy items without `priceQty`. Null when uncalculable
+   * (e.g. pantry items with `priceQty` set but no quantity).
+   */
+  cost: number | null;
   /** Whether this item came from the pantry "Add to shopping list" flow */
   fromPantry: boolean;
   /** When fromPantry is true: true = household (synced with partner), false = individual (this user only) */

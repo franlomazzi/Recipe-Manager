@@ -315,12 +315,21 @@ export async function addCookLog(
     createdAt: serverTimestamp(),
   });
 
-  // Update aggregate rating on recipe
+  // Update aggregate stats on recipe
   const logs = await getCookLogs(recipeId);
   const avgRating = logs.reduce((sum, l) => sum + l.rating, 0) / logs.length;
+  const logsWithDuration = logs.filter(
+    (l) => l.durationMinutes != null && l.durationMinutes > 1
+  );
+  const avgDuration =
+    logsWithDuration.length > 0
+      ? logsWithDuration.reduce((sum, l) => sum + (l.durationMinutes ?? 0), 0) /
+        logsWithDuration.length
+      : null;
   await updateDoc(doc(db, COLLECTION, recipeId), {
     rating: Math.round(avgRating * 10) / 10,
     cookCount: increment(1),
+    ...(avgDuration !== null ? { averageDuration: Math.round(avgDuration) } : {}),
   });
 
   return logRef.id;

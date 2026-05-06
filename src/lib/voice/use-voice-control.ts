@@ -17,22 +17,13 @@ import type {
 
 const STORAGE_KEY_ENABLED = "voice.enabled";
 const STORAGE_KEY_TTS = "voice.ttsEnabled";
-const STORAGE_KEY_LANG = "voice.lang";
-const DEFAULT_LANG = "en-US";
-// BCP-47 tags known to be supported by Chrome's Web Speech. Offering multiple
-// English variants directly helps non-US accents — the engine's acoustic
-// model for en-GB/en-AU/en-IN is tuned for those speakers and often
-// transcribes them more accurately than en-US.
-export const SUPPORTED_LANGS: ReadonlyArray<{ code: string; label: string }> = [
-  { code: "en-US", label: "English (US)" },
-  { code: "en-GB", label: "English (UK)" },
-  { code: "en-AU", label: "English (Australia)" },
-  { code: "en-IN", label: "English (India)" },
-  { code: "en-CA", label: "English (Canada)" },
-  { code: "en-NZ", label: "English (New Zealand)" },
-  { code: "en-IE", label: "English (Ireland)" },
-  { code: "en-ZA", label: "English (South Africa)" },
-];
+
+// Use the browser's configured locale — this is what Google/Siri use and
+// gives the best accuracy for the user's accent out of the box.
+function getBrowserLang(): string {
+  if (typeof navigator === "undefined") return "en-US";
+  return navigator.language || "en-US";
+}
 const WATCHDOG_INTERVAL_MS = 5000;
 const BACKOFF_INITIAL_MS = 200;
 const BACKOFF_MAX_MS = 5000;
@@ -79,10 +70,8 @@ export interface UseVoiceControlReturn {
   /** Currently-being-spoken partial transcript — drives the live caption. */
   interimTranscript: string;
   dictation: DictationState | null;
-  lang: string;
   toggle: () => void;
   setTTSEnabled: (on: boolean) => void;
-  setLang: (code: string) => void;
   cancelDictation: () => void;
   saveDictation: () => void;
 }
@@ -104,12 +93,6 @@ export function useVoiceControl(): UseVoiceControlReturn {
   /** Interim (still-being-spoken) transcript for the live caption UI. */
   const [interimTranscript, setInterimTranscript] = useState("");
   const [dictation, setDictation] = useState<DictationState | null>(null);
-  const [lang, setLangState] = useState<string>(() => {
-    if (typeof window === "undefined") return DEFAULT_LANG;
-    const raw = localStorage.getItem(STORAGE_KEY_LANG);
-    if (!raw) return DEFAULT_LANG;
-    return SUPPORTED_LANGS.some((l) => l.code === raw) ? raw : DEFAULT_LANG;
-  });
 
   // Refs for values the recognizer callbacks need to read freshly
   // without re-creating the backend on every session tick.
@@ -344,16 +327,9 @@ export function useVoiceControl(): UseVoiceControlReturn {
     }
   };
 
-  const langRef = useRef(lang);
-  useEffect(() => {
-    langRef.current = lang;
-  }, [lang]);
-
   const startRecognizer = useCallback(() => {
     if (!backendRef.current) {
-      backendRef.current = new WebSpeechBackend(langRef.current);
-    } else {
-      backendRef.current.setLang(langRef.current);
+      backendRef.current = new WebSpeechBackend(getBrowserLang());
     }
     if (!backendRef.current.isSupported) {
       setStatus("error-unsupported");
@@ -608,26 +584,6 @@ export function useVoiceControl(): UseVoiceControlReturn {
     setEnabled(next);
   }, [support.stt, startRecognizer, stopRecognizer]);
 
-  const setLang = useCallback(
-    (code: string) => {
-      if (!SUPPORTED_LANGS.some((l) => l.code === code)) return;
-      setLangState(code);
-      langRef.current = code;
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STORAGE_KEY_LANG, code);
-      }
-      backendRef.current?.setLang(code);
-      // If voice is on, cycle the recognizer so the change takes effect
-      // immediately rather than waiting for the next natural restart.
-      if (enabledRef.current && recognizerAliveRef.current) {
-        manuallyStoppedRef.current = false;
-        backendRef.current?.abort();
-        // onend will fire and scheduleRestart will re-open with the new lang.
-      }
-    },
-    []
-  );
-
   const setTTSEnabled = useCallback((on: boolean) => {
     setTTSEnabledState(on);
     if (typeof window !== "undefined") {
@@ -647,10 +603,8 @@ export function useVoiceControl(): UseVoiceControlReturn {
     lastTranscript,
     interimTranscript,
     dictation,
-    lang,
     toggle,
     setTTSEnabled,
-    setLang,
     cancelDictation,
     saveDictation,
   };

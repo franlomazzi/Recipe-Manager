@@ -8,14 +8,9 @@ import {
   VolumeX,
   AlertCircle,
   Loader2,
-  Globe,
-  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  SUPPORTED_LANGS,
-  type UseVoiceControlReturn,
-} from "@/lib/voice/use-voice-control";
+import type { UseVoiceControlReturn } from "@/lib/voice/use-voice-control";
 
 interface VoiceControlProps {
   voice: UseVoiceControlReturn;
@@ -34,29 +29,9 @@ export function VoiceControl({ voice }: VoiceControlProps) {
     support,
     lastTranscript,
     interimTranscript,
-    lang,
     toggle,
     setTTSEnabled,
-    setLang,
   } = voice;
-
-  const [langMenuOpen, setLangMenuOpen] = useState(false);
-  const langMenuRef = useRef<HTMLDivElement | null>(null);
-
-  // Close the language menu on outside click.
-  useEffect(() => {
-    if (!langMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (
-        langMenuRef.current &&
-        !langMenuRef.current.contains(e.target as Node)
-      ) {
-        setLangMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [langMenuOpen]);
 
   // Caption visibility — we store the transcript whose hold window has
   // ELAPSED. Any lastTranscript that differs from that is still "fresh"
@@ -139,9 +114,6 @@ export function VoiceControl({ voice }: VoiceControlProps) {
       ? AlertCircle
       : null;
 
-  const currentLangLabel =
-    SUPPORTED_LANGS.find((l) => l.code === lang)?.label ?? lang;
-
   return (
     <div className="relative flex items-center gap-1.5">
       <button
@@ -187,47 +159,6 @@ export function VoiceControl({ voice }: VoiceControlProps) {
               />
             )}
             <span>{statusLabel}</span>
-          </div>
-
-          {/* Language selector — helps non-US-English speakers pick a
-              dialect model that transcribes their accent more accurately. */}
-          <div className="relative" ref={langMenuRef}>
-            <button
-              type="button"
-              onClick={() => setLangMenuOpen((o) => !o)}
-              className="hidden sm:flex h-9 items-center gap-1 rounded-xl border border-transparent bg-muted px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted/80"
-              aria-label={`Voice language: ${currentLangLabel}`}
-              title={`Voice language: ${currentLangLabel}`}
-            >
-              <Globe className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">{lang}</span>
-            </button>
-            {langMenuOpen && (
-              <div className="absolute right-0 top-full z-[60] mt-1 w-52 rounded-xl border border-border bg-popover p-1 shadow-lg">
-                {SUPPORTED_LANGS.map((l) => {
-                  const active = l.code === lang;
-                  return (
-                    <button
-                      key={l.code}
-                      type="button"
-                      onClick={() => {
-                        setLang(l.code);
-                        setLangMenuOpen(false);
-                      }}
-                      className={cn(
-                        "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs hover:bg-muted",
-                        active
-                          ? "text-foreground font-medium"
-                          : "text-muted-foreground"
-                      )}
-                    >
-                      <span>{l.label}</span>
-                      {active && <Check className="h-3.5 w-3.5" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
           </div>
 
           <button

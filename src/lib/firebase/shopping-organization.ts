@@ -169,6 +169,7 @@ export async function updateLibraryIngredient(
     shoppingCategoryId?: string | null;
     shoppingNote?: string | null;
     shoppingPrice?: number | null;
+    shoppingPriceQty?: number | null;
     isPantryItem?: boolean;
   }
 ): Promise<void> {
@@ -206,6 +207,7 @@ export async function createPantryLibraryIngredient(
     shoppingCategoryId?: string | null;
     shoppingNote?: string | null;
     shoppingPrice?: number | null;
+    shoppingPriceQty?: number | null;
   } = {}
 ): Promise<string> {
   const id = crypto.randomUUID();

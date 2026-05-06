@@ -43,27 +43,38 @@ export interface CommandDef {
 /**
  * Strip the wake word prefix from a transcript. Returns null if the utterance
  * did not begin with a recognized wake word.
- *
- * Recognized wake words: "chef", "hey chef", "okay chef", "recipe" (secondary).
- * We also tolerate common STT confusions: "sheaf", "cheff".
  */
 const WAKE_WORDS = [
-  "chef",
-  "chefs",
-  "sheaf",
-  "cheff",
-  "hey chef",
-  "ok chef",
-  "okay chef",
+  // Standard forms
+  "chef", "chefs", "chef's",
+  // Common STT misrecognitions of "chef" across accents
+  "sheaf", "cheff", "sheff", "jeff", "shelf", "check",
+  // Prefixed forms
+  "hey chef", "ok chef", "okay chef",
+  "hey jeff", "hey check",
+  // Secondary wake word
   "recipe",
 ];
 
+// Filler words people naturally say before or after the wake word that should
+// not be part of the command (e.g. "um chef, next step").
+const FILLER_PREFIX_RE = /^(?:(?:um|uh|er|well|so|please|can you|could you|would you)\s+)+/;
+
+function normalizeRaw(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[.,!?;:'"]/g, "")  // strip punctuation including apostrophes
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function stripWakeWord(transcript: string): string | null {
-  const normalized = transcript.trim().toLowerCase().replace(/[.,!?]/g, "");
+  const normalized = normalizeRaw(transcript).replace(FILLER_PREFIX_RE, "");
   for (const w of WAKE_WORDS) {
     if (normalized === w) return "";
-    if (normalized.startsWith(w + " ") || normalized.startsWith(w + ",")) {
-      return normalized.slice(w.length).replace(/^[\s,]+/, "");
+    if (normalized.startsWith(w + " ")) {
+      return normalized.slice(w.length).trimStart().replace(FILLER_PREFIX_RE, "");
     }
   }
   return null;
@@ -111,6 +122,10 @@ export const COMMANDS: CommandDef[] = [
       /^forward$/,
       /^move on$/,
       /^skip$/,
+      /^next one$/,
+      /^go ahead$/,
+      /^proceed$/,
+      /^step forward$/,
     ],
     handler: (ctx) => {
       const s = ctx.activeSession;
@@ -132,6 +147,9 @@ export const COMMANDS: CommandDef[] = [
       /^previous(?:\s+step)?$/,
       /^go\s+back$/,
       /^last\s+step$/,
+      /^step back$/,
+      /^go back one$/,
+      /^one back$/,
     ],
     handler: (ctx) => {
       const s = ctx.activeSession;
@@ -166,6 +184,9 @@ export const COMMANDS: CommandDef[] = [
       /^read\s+(?:it|that)(?:\s+again)?$/,
       /^what('?s| is)\s+(?:the\s+)?(?:current\s+)?step$/,
       /^say\s+(?:it\s+)?again$/,
+      /^read\s+(?:it\s+)?to\s+me$/,
+      /^what does it say$/,
+      /^read\s+(?:the\s+)?instructions?$/,
     ],
     handler: (ctx) => {
       const s = ctx.activeSession;
@@ -257,7 +278,7 @@ export const COMMANDS: CommandDef[] = [
   },
   {
     id: "pause-timer",
-    patterns: [/^pause(?:\s+(?:the\s+)?timer)?$/, /^stop(?:\s+(?:the\s+)?timer)?$/, /^hold on$/],
+    patterns: [/^pause(?:\s+(?:the\s+)?timer)?$/, /^stop(?:\s+(?:the\s+)?timer)?$/, /^hold on$/, /^hold(?:\s+(?:the\s+)?timer)?$/, /^freeze(?:\s+(?:the\s+)?timer)?$/],
     handler: (ctx) => {
       const t = findCurrentStepTimer(ctx);
       if (!t) {
@@ -351,7 +372,10 @@ export const COMMANDS: CommandDef[] = [
     patterns: [
       /^how\s+(?:much\s+)?(?:long|time)(?:\s+(?:is\s+)?left)?$/,
       /^time\s+(?:left|remaining)$/,
-      /^how\s+long\s+(?:do\s+i\s+have|(?:is|'s)\s+left)$/,
+      /^how\s+long\s+(?:do\s+i\s+have|(?:is|s)\s+left)$/,
+      /^timer\s+(?:status|check)$/,
+      /^how\s+much\s+time\s+(?:do\s+i\s+have|(?:is\s+)?left|remaining)$/,
+      /^whats\s+(?:the\s+)?time(?:\s+left)?$/,
     ],
     handler: (ctx) => {
       const t = findCurrentStepTimer(ctx);
@@ -396,7 +420,7 @@ export const COMMANDS: CommandDef[] = [
   // ── Help ───────────────────────────────────────────────────────────────
   {
     id: "help",
-    patterns: [/^help$/, /^what can (?:i|you) say$/, /^commands$/],
+    patterns: [/^help$/, /^what can (?:i|you) say$/, /^commands$/, /^what commands$/, /^(?:show\s+)?(?:all\s+)?commands$/, /^how does this work$/],
     handler: (ctx) => {
       ctx.speak(
         "Try: next step, previous, start timer, pause, add three minutes, how long left, read step, ingredients."
@@ -447,7 +471,9 @@ export function classifyDictation(raw: string): DictationDirective {
 }
 
 export function matchCommand(stripped: string): MatchResult | null {
-  const normalized = stripped.trim().toLowerCase();
+  // Normalize again here: the caller may pass text from alternatives that
+  // wasn't run through normalizeRaw yet (e.g. "next step." with trailing dot).
+  const normalized = normalizeRaw(stripped).replace(FILLER_PREFIX_RE, "");
   if (!normalized) return null;
   for (const cmd of COMMANDS) {
     for (const p of cmd.patterns) {
