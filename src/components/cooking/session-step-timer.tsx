@@ -97,7 +97,14 @@ export function SessionStepTimer({
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      <div className="flex items-center gap-2">
+        {timer && timers.length > 1 && (
+          <span className="font-mono text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+            #{timer.timerNumber}
+          </span>
+        )}
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      </div>
 
       <div className="relative flex h-36 w-36 items-center justify-center">
         <svg className="absolute h-full w-full -rotate-90" viewBox="0 0 120 120">
@@ -157,40 +164,29 @@ export function SessionStepTimer({
 
       {hasStarted && (
         <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 px-2 text-xs font-mono"
-            onClick={() => adjustTimer(timer!.id, -60)}
-            disabled={!isComplete && remainingSeconds <= 0}
-          >
-            −1m
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 px-2 text-xs font-mono"
-            onClick={() => adjustTimer(timer!.id, -10)}
-            disabled={!isComplete && remainingSeconds <= 0}
-          >
-            −10s
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 px-2 text-xs font-mono"
-            onClick={() => adjustTimer(timer!.id, 10)}
-          >
-            +10s
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 px-2 text-xs font-mono"
-            onClick={() => adjustTimer(timer!.id, 60)}
-          >
-            +1m
-          </Button>
+          {([-60, -30, -10, -5] as const).map((delta) => (
+            <Button
+              key={delta}
+              variant="outline"
+              size="sm"
+              className="h-8 px-2 text-xs font-mono"
+              onClick={() => adjustTimer(timer!.id, delta)}
+              disabled={!isComplete && remainingSeconds <= 0}
+            >
+              {delta === -60 ? "−1m" : `${delta}s`}
+            </Button>
+          ))}
+          {([5, 10, 30, 60] as const).map((delta) => (
+            <Button
+              key={delta}
+              variant="outline"
+              size="sm"
+              className="h-8 px-2 text-xs font-mono"
+              onClick={() => adjustTimer(timer!.id, delta)}
+            >
+              {delta === 60 ? "+1m" : `+${delta}s`}
+            </Button>
+          ))}
         </div>
       )}
     </div>

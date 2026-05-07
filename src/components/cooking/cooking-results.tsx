@@ -182,10 +182,12 @@ export function CookingResults({
                 <div className="flex items-center gap-3">
                   <input
                     type="number"
+                    inputMode="numeric"
                     min={1}
                     max={600}
                     placeholder="—"
                     value={durationMinutes}
+                    onFocus={(e) => e.currentTarget.select()}
                     onChange={(e) => setDurationMinutes(e.target.value)}
                     className="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />

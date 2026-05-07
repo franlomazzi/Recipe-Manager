@@ -3,6 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useCookingSession } from "@/lib/contexts/cooking-session-context";
 import { CookingStepDisplay } from "./cooking-step-display";
 import { TimerBar } from "./timer-bar";
@@ -17,6 +25,7 @@ export function MultiCookView() {
   const { sessions, activeSessionId, setActiveSession, removeSession } =
     useCookingSession();
   const [showAddSheet, setShowAddSheet] = useState(false);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const voice = useVoiceControl();
 
   useEffect(() => {
@@ -72,7 +81,7 @@ export function MultiCookView() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => removeSession(session.recipeId)}
+                    onClick={() => setConfirmRemoveId(session.recipeId)}
                     className="px-2 py-2 opacity-60 hover:opacity-100"
                     aria-label="Stop cooking this recipe"
                   >
@@ -107,6 +116,40 @@ export function MultiCookView() {
       <TimerBar />
 
       {showAddSheet && <AddRecipeSheet onClose={() => setShowAddSheet(false)} />}
+
+      <Dialog
+        open={confirmRemoveId !== null}
+        onOpenChange={(open) => !open && setConfirmRemoveId(null)}
+      >
+        <DialogContent className="z-[80]">
+          <DialogHeader>
+            <DialogTitle>Stop cooking this recipe?</DialogTitle>
+            <DialogDescription>
+              {(() => {
+                const s = sessions.find((x) => x.recipeId === confirmRemoveId);
+                return s
+                  ? `This will end the cooking session for "${s.recipe.title}" and clear its progress.`
+                  : "This will end the cooking session and clear its progress.";
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRemoveId(null)}>
+              Keep cooking
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (confirmRemoveId) removeSession(confirmRemoveId);
+                setConfirmRemoveId(null);
+              }}
+            >
+              Stop
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       {voice.dictation && (
         <VoiceDictationOverlay

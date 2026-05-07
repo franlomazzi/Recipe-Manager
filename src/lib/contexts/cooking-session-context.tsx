@@ -282,17 +282,68 @@ const CookingSessionContext = createContext<CookingSessionContextValue | null>(
   null
 );
 
+const STORAGE_KEY = "cooking-session-state-v1";
+
+const EMPTY_STATE: State = {
+  sessions: [],
+  activeSessionId: null,
+  timers: [],
+  acknowledgedIds: [],
+};
+
+function loadInitialState(): State {
+  if (typeof window === "undefined") return EMPTY_STATE;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return EMPTY_STATE;
+    const parsed = JSON.parse(raw) as { state: State; savedAt: number } | null;
+    if (!parsed?.state) return EMPTY_STATE;
+    const { state, savedAt } = parsed;
+    if (!state.sessions?.length && !state.timers?.length) return EMPTY_STATE;
+
+    // Advance running timers by the wall-clock time spent away.
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - savedAt) / 1000));
+    const timers = (state.timers ?? []).map((t) => {
+      if (!t.isRunning || t.isComplete) return t;
+      const next = t.remainingSeconds - elapsedSec;
+      if (next <= 0) {
+        return { ...t, remainingSeconds: 0, isRunning: false, isComplete: true };
+      }
+      return { ...t, remainingSeconds: next };
+    });
+    return {
+      sessions: state.sessions ?? [],
+      activeSessionId: state.activeSessionId ?? null,
+      timers,
+      acknowledgedIds: state.acknowledgedIds ?? [],
+    };
+  } catch {
+    return EMPTY_STATE;
+  }
+}
+
 export function CookingSessionProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [state, dispatch] = useReducer(reducer, {
-    sessions: [],
-    activeSessionId: null,
-    timers: [],
-    acknowledgedIds: [],
-  });
+  const [state, dispatch] = useReducer(reducer, undefined, loadInitialState);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (state.sessions.length === 0 && state.timers.length === 0) {
+        localStorage.removeItem(STORAGE_KEY);
+      } else {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ state, savedAt: Date.now() })
+        );
+      }
+    } catch {
+      // Quota exceeded or storage unavailable — ignore.
+    }
+  }, [state]);
 
   const [persistentAlarm, setPersistentAlarmState] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
@@ -307,6 +358,7 @@ export function CookingSessionProvider({
     }
   }, []);
 
+  const nextTimerNumberRef = useRef(1);
   const audioContextRef = useRef<AudioContext | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const prevTimersRef = useRef<ActiveTimer[]>([]);
@@ -451,12 +503,13 @@ export function CookingSessionProvider({
 
   const startTimer = useCallback(
     (
-      timerData: Omit<ActiveTimer, "id" | "isRunning" | "isComplete">
+      timerData: Omit<ActiveTimer, "id" | "isRunning" | "isComplete" | "timerNumber">
     ): string => {
       const id = crypto.randomUUID();
+      const timerNumber = nextTimerNumberRef.current++;
       dispatch({
         type: "START_TIMER",
-        timer: { ...timerData, id, isRunning: true, isComplete: false },
+        timer: { ...timerData, id, timerNumber, isRunning: true, isComplete: false },
       });
       return id;
     },

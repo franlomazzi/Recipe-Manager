@@ -98,6 +98,9 @@ export function TimerBar() {
             </div>
             {featured && (
               <div className="text-xs text-muted-foreground truncate max-w-[200px] md:max-w-none">
+                {timers.length > 1 && (
+                  <span className="font-mono text-primary mr-1">#{featured.timerNumber}</span>
+                )}
                 {featured.recipeTitle} · {featured.label} ·{" "}
                 <span
                   className={`font-mono ${featured.isComplete ? "text-success" : ""}`}
@@ -165,7 +168,12 @@ export function TimerBar() {
                   onClick={() => jumpToTimer(timer.recipeId, timer.stepIndex)}
                   className="text-left block w-full"
                 >
-                  <div className="text-sm font-medium truncate">
+                  <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {timers.length > 1 && (
+                      <span className="font-mono text-xs text-primary bg-primary/10 px-1 py-0.5 rounded shrink-0">
+                        #{timer.timerNumber}
+                      </span>
+                    )}
                     {timer.recipeTitle}
                   </div>
                   <div className="text-xs text-muted-foreground truncate">
@@ -181,44 +189,31 @@ export function TimerBar() {
                 {timer.isComplete ? "Done!" : formatTime(timer.remainingSeconds)}
               </div>
               <div className="flex items-center gap-0.5">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-1.5 text-xs font-mono"
-                  onClick={() => adjustTimer(timer.id, -60)}
-                  disabled={!timer.isComplete && timer.remainingSeconds <= 0}
-                  title="Subtract 1 minute"
-                >
-                  −1m
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-1.5 text-xs font-mono"
-                  onClick={() => adjustTimer(timer.id, -10)}
-                  disabled={!timer.isComplete && timer.remainingSeconds <= 0}
-                  title="Subtract 10 seconds"
-                >
-                  −10s
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-1.5 text-xs font-mono"
-                  onClick={() => adjustTimer(timer.id, 10)}
-                  title="Add 10 seconds"
-                >
-                  +10s
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-1.5 text-xs font-mono"
-                  onClick={() => adjustTimer(timer.id, 60)}
-                  title="Add 1 minute"
-                >
-                  +1m
-                </Button>
+                {([-60, -30, -10, -5] as const).map((delta) => (
+                  <Button
+                    key={delta}
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-1.5 text-xs font-mono"
+                    onClick={() => adjustTimer(timer.id, delta)}
+                    disabled={!timer.isComplete && timer.remainingSeconds <= 0}
+                    title={delta === -60 ? "Subtract 1 minute" : `Subtract ${Math.abs(delta)} seconds`}
+                  >
+                    {delta === -60 ? "−1m" : `${delta}s`}
+                  </Button>
+                ))}
+                {([5, 10, 30, 60] as const).map((delta) => (
+                  <Button
+                    key={delta}
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-1.5 text-xs font-mono"
+                    onClick={() => adjustTimer(timer.id, delta)}
+                    title={delta === 60 ? "Add 1 minute" : `Add ${delta} seconds`}
+                  >
+                    {delta === 60 ? "+1m" : `+${delta}s`}
+                  </Button>
+                ))}
               </div>
               <div className="flex items-center gap-1">
                 {!timer.isComplete && (

@@ -255,9 +255,11 @@ function SortableIngredientRow({
             className="col-span-1 sm:col-span-2"
             placeholder="Qty"
             type="number"
+            inputMode="decimal"
             step="any"
             min="0"
             value={ing.quantity ?? ""}
+            onFocus={(e) => e.currentTarget.select()}
             onChange={(e) =>
               onUpdateIngredient(index, "quantity", e.target.value ? parseFloat(e.target.value) : null)
             }
@@ -454,8 +456,10 @@ function SortableStepCard({
               <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1">
                 <Input
                   type="number"
+                  inputMode="numeric"
                   min="1"
                   value={step.timerMinutes}
+                  onFocus={(e) => e.currentTarget.select()}
                   onChange={(e) =>
                     onUpdateStep(index, "timerMinutes", parseInt(e.target.value) || 1)
                   }
@@ -501,11 +505,13 @@ function SortableStepCard({
                         <div className="flex items-center gap-1 shrink-0">
                           <Input
                             type="number"
+                            inputMode="decimal"
                             step="any"
                             min="0"
                             max={maxAvailable ?? undefined}
                             value={si.quantity ?? ""}
                             placeholder="Qty"
+                            onFocus={(e) => e.currentTarget.select()}
                             onChange={(e) =>
                               onUpdateStepIngredient(
                                 index,
@@ -1493,9 +1499,11 @@ export function RecipeForm({
               <Input
                 id="prepTime"
                 type="number"
+                inputMode="numeric"
                 min="0"
                 placeholder="15"
                 value={prepTime}
+                onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => setPrepTime(e.target.value)}
               />
             </div>
@@ -1504,9 +1512,11 @@ export function RecipeForm({
               <Input
                 id="cookTime"
                 type="number"
+                inputMode="numeric"
                 min="0"
                 placeholder="30"
                 value={cookTime}
+                onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => setCookTime(e.target.value)}
               />
             </div>
@@ -1515,9 +1525,11 @@ export function RecipeForm({
               <Input
                 id="servings"
                 type="number"
+                inputMode="numeric"
                 min="1"
                 placeholder="4"
                 value={servings}
+                onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => setServings(e.target.value)}
               />
             </div>

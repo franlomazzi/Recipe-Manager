@@ -15,16 +15,20 @@ const MODEL = "gemini-3-flash-preview";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const TIMEOUT_MS = 60_000;
 
-const TRANSLATE_SYSTEM_PROMPT = `You are a recipe translator. You will receive a recipe as JSON and must return the same recipe translated into the requested language.
+const TRANSLATE_SYSTEM_PROMPT = `You translate every human-readable text field of a recipe JSON into the target language. The input recipe is in a source language; your output MUST contain no source-language words in any translatable field.
 
-Rules:
-- Translate ONLY these text fields: title, description, notes, each ingredient name, each ingredient note, each step instruction, each step timerLabel.
-- Do NOT change any numeric fields (quantity, prepTime, cookTime, servings, timerMinutes, order).
-- Do NOT change unit codes, category enum values, difficulty, or the categories array.
-- Do NOT change sourceUrl or detectedLanguage.
-- Keep ingredient names lowercase and plain (no prep or quantity).
-- Keep step instructions imperative and concise, preserving explicit timings.
-- Return a complete JSON object matching the schema exactly.`;
+Translate every one of these fields, for every item in the arrays:
+- title
+- description
+- notes
+- ingredients[].name (translate the ingredient word itself, e.g. "pollo" -> "chicken", "harina" -> "flour"; keep lowercase, plain, no quantity or prep)
+- ingredients[].note (e.g. "finamente picado" -> "finely chopped")
+- steps[].instruction (rewrite the cooking step in the target language, imperative and concise, preserving any explicit timings)
+- steps[].timerLabel (e.g. "Hornear" -> "Bake")
+
+Copy these fields through unchanged: quantity, prepTime, cookTime, servings, timerMinutes, order, unit, ingredients[].category, difficulty, categories, sourceUrl, detectedLanguage.
+
+Do not skip fields. Do not leave any translatable field in the source language. Return one complete JSON object matching the schema, with the same number of ingredients and steps as the input.`;
 
 export async function POST(req: Request) {
   try {

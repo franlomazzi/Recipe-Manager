@@ -2,6 +2,8 @@ import type { Recipe, CookLog } from "./recipe";
 
 export interface ActiveTimer {
   id: string;
+  /** Stable 1-based display number, assigned at creation and never reused. */
+  timerNumber: number;
   recipeId: string;
   recipeTitle: string;
   stepIndex: number;
@@ -38,7 +40,7 @@ export interface CookingSessionContextValue {
   removeSession: (recipeId: string) => void;
   setActiveSession: (recipeId: string) => void;
   updateSession: (recipeId: string, updates: Partial<CookingSession>) => void;
-  startTimer: (timer: Omit<ActiveTimer, "id" | "isRunning" | "isComplete">) => string;
+  startTimer: (timer: Omit<ActiveTimer, "id" | "isRunning" | "isComplete" | "timerNumber">) => string;
   pauseTimer: (timerId: string) => void;
   resumeTimer: (timerId: string) => void;
   resetTimer: (timerId: string) => void;

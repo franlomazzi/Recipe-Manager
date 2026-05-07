@@ -1,7 +1,7 @@
 "use client";
 
 import type { ActiveTimer, CookingSession } from "@/lib/types/cooking-session";
-import { parseDurationSeconds } from "./number-words";
+import { parseDurationSeconds, wordsToNumber } from "./number-words";
 
 export interface CommandContext {
   activeSession: CookingSession | null;
@@ -10,7 +10,7 @@ export interface CommandContext {
   // Session actions (already on CookingSessionContextValue)
   updateSession: (recipeId: string, updates: Partial<CookingSession>) => void;
   startTimer: (
-    t: Omit<ActiveTimer, "id" | "isRunning" | "isComplete">
+    t: Omit<ActiveTimer, "id" | "isRunning" | "isComplete" | "timerNumber">
   ) => string;
   pauseTimer: (id: string) => void;
   resumeTimer: (id: string) => void;
@@ -78,6 +78,13 @@ export function stripWakeWord(transcript: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Helper: find a timer by its stable display number.
+ */
+function findTimerByNumber(ctx: CommandContext, num: number): ActiveTimer | null {
+  return ctx.timers.find((t) => t.timerNumber === num) ?? null;
 }
 
 /**
@@ -197,6 +204,113 @@ export const COMMANDS: CommandDef[] = [
       // content the user actually wants to listen to, so it's worth the
       // network round-trip.
       ctx.speakRich(text);
+    },
+  },
+
+  // ── Timers (numbered — more specific, must come before generic variants) ──
+  {
+    id: "pause-timer-n",
+    patterns: [
+      /^(?:pause|stop|hold|freeze)\s+timer\s+(.+)$/,
+    ],
+    handler: (ctx, m) => {
+      const num = wordsToNumber(m.remainder);
+      if (!num) { ctx.speak("Which timer number?"); return; }
+      const t = findTimerByNumber(ctx, num);
+      if (!t) { ctx.speak(`No timer ${num}.`); return; }
+      if (!t.isRunning) { ctx.speak(`Timer ${num} is already paused.`); return; }
+      ctx.pauseTimer(t.id);
+      ctx.speak(`Timer ${num} paused.`);
+    },
+  },
+  {
+    id: "resume-timer-n",
+    patterns: [
+      /^resume\s+timer\s+(.+)$/,
+      /^unpause\s+timer\s+(.+)$/,
+    ],
+    handler: (ctx, m) => {
+      const num = wordsToNumber(m.remainder);
+      if (!num) { ctx.speak("Which timer number?"); return; }
+      const t = findTimerByNumber(ctx, num);
+      if (!t) { ctx.speak(`No timer ${num}.`); return; }
+      if (t.isRunning) { ctx.speak(`Timer ${num} is already running.`); return; }
+      ctx.resumeTimer(t.id);
+      ctx.speak(`Timer ${num} resumed.`);
+    },
+  },
+  {
+    id: "reset-timer-n",
+    patterns: [
+      /^reset\s+timer\s+(.+)$/,
+      /^restart\s+timer\s+(.+)$/,
+    ],
+    handler: (ctx, m) => {
+      const num = wordsToNumber(m.remainder);
+      if (!num) { ctx.speak("Which timer number?"); return; }
+      const t = findTimerByNumber(ctx, num);
+      if (!t) { ctx.speak(`No timer ${num}.`); return; }
+      ctx.resetTimer(t.id);
+      ctx.speak(`Timer ${num} reset.`);
+    },
+  },
+  {
+    id: "add-time-timer-n",
+    patterns: [
+      /^add\s+(.+\s+to\s+timer\s+\S+)$/,
+      /^extend\s+timer\s+\S+\s+by\s+(.+\s+timer\s+\S+)$/,
+    ],
+    handler: (ctx, m) => {
+      const text = m.remainder; // e.g. "30 seconds to timer 2"
+      const timerMatch = /\s+to\s+timer\s+(\S+)$/.exec(text);
+      if (!timerMatch) { ctx.speak("I didn't catch the timer number."); return; }
+      const num = wordsToNumber(timerMatch[1]);
+      if (!num) { ctx.speak("I didn't catch the timer number."); return; }
+      const t = findTimerByNumber(ctx, num);
+      if (!t) { ctx.speak(`No timer ${num}.`); return; }
+      const duration = text.slice(0, timerMatch.index).trim();
+      const seconds = parseDurationSeconds(duration);
+      if (!seconds || seconds <= 0) { ctx.speak("I didn't catch how much."); return; }
+      ctx.adjustTimer(t.id, seconds);
+      ctx.speak(`Added ${formatDurationSpeech(seconds)} to timer ${num}.`);
+    },
+  },
+  {
+    id: "subtract-time-timer-n",
+    patterns: [
+      /^(?:subtract|remove|cut)\s+(.+\s+from\s+timer\s+\S+)$/,
+      /^(?:minus|take\s+(?:off|away))\s+(.+\s+from\s+timer\s+\S+)$/,
+    ],
+    handler: (ctx, m) => {
+      const text = m.remainder; // e.g. "30 seconds from timer 2"
+      const timerMatch = /\s+from\s+timer\s+(\S+)$/.exec(text);
+      if (!timerMatch) { ctx.speak("I didn't catch the timer number."); return; }
+      const num = wordsToNumber(timerMatch[1]);
+      if (!num) { ctx.speak("I didn't catch the timer number."); return; }
+      const t = findTimerByNumber(ctx, num);
+      if (!t) { ctx.speak(`No timer ${num}.`); return; }
+      const duration = text.slice(0, timerMatch.index).trim();
+      const seconds = parseDurationSeconds(duration);
+      if (!seconds || seconds <= 0) { ctx.speak("I didn't catch how much."); return; }
+      ctx.adjustTimer(t.id, -seconds);
+      ctx.speak(`Removed ${formatDurationSpeech(seconds)} from timer ${num}.`);
+    },
+  },
+  {
+    id: "time-left-timer-n",
+    patterns: [
+      /^how\s+(?:long|much\s+time)(?:\s+(?:is\s+)?left)?\s+(?:on|for)\s+timer\s+(.+)$/,
+      /^time\s+(?:left|remaining)\s+(?:on|for)\s+timer\s+(.+)$/,
+      /^timer\s+(\S+)\s+(?:status|time|check)$/,
+      /^whats?\s+(?:the\s+)?time\s+(?:on|for)\s+timer\s+(.+)$/,
+    ],
+    handler: (ctx, m) => {
+      const num = wordsToNumber(m.remainder);
+      if (!num) { ctx.speak("Which timer number?"); return; }
+      const t = findTimerByNumber(ctx, num);
+      if (!t) { ctx.speak(`No timer ${num}.`); return; }
+      if (t.isComplete) { ctx.speak(`Timer ${num} is done.`); return; }
+      ctx.speak(`Timer ${num}: ${formatDurationSpeech(t.remainingSeconds)} left.`);
     },
   },
 
@@ -423,7 +537,7 @@ export const COMMANDS: CommandDef[] = [
     patterns: [/^help$/, /^what can (?:i|you) say$/, /^commands$/, /^what commands$/, /^(?:show\s+)?(?:all\s+)?commands$/, /^how does this work$/],
     handler: (ctx) => {
       ctx.speak(
-        "Try: next step, previous, start timer, pause, add three minutes, how long left, read step, ingredients."
+        "Try: next step, previous, start timer, pause, add three minutes, how long left, read step, ingredients. With multiple timers, say: pause timer two, add 30 seconds to timer one, time left on timer two."
       );
     },
   },

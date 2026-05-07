@@ -74,6 +74,10 @@ export default function MealPlanPage() {
 
   async function handleEndPlan() {
     if (!instance) return;
+    const ok = window.confirm(
+      "Finish this plan? It will be marked as ended and removed from your active plan view."
+    );
+    if (!ok) return;
     setEndingPlan(true);
     try {
       await endInstanceEarly(instance.id, "");

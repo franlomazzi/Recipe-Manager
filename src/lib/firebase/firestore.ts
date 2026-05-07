@@ -443,6 +443,14 @@ export async function forkRecipe(
   sourceRecipe: Recipe,
   newTitle: string
 ): Promise<string> {
+  const ingredientIdRemap = new Map(
+    sourceRecipe.ingredients.map((i) => [i.id, crypto.randomUUID()])
+  );
+  const forkedIngredients = sourceRecipe.ingredients.map((i) => ({
+    ...i,
+    id: ingredientIdRemap.get(i.id)!,
+  }));
+
   const forkedData: Omit<
     Recipe,
     "id" | "userId" | "createdAt" | "updatedAt"
@@ -459,11 +467,15 @@ export async function forkRecipe(
     photoStoragePath: null,
     notes: sourceRecipe.notes,
     isFavorite: false,
-    ingredients: sourceRecipe.ingredients.map((i) => ({
-      ...i,
+    ingredients: forkedIngredients,
+    steps: sourceRecipe.steps.map((s) => ({
+      ...s,
       id: crypto.randomUUID(),
+      ingredients: s.ingredients.map((si) => ({
+        ...si,
+        ingredientId: ingredientIdRemap.get(si.ingredientId) ?? si.ingredientId,
+      })),
     })),
-    steps: sourceRecipe.steps.map((s) => ({ ...s, id: crypto.randomUUID() })),
     searchTerms: sourceRecipe.searchTerms,
     version: 1,
     parentRecipeId: sourceRecipe.id,

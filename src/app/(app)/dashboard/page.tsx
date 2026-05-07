@@ -1,8 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { addDays } from "date-fns";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
+import { useActivePlan } from "@/lib/hooks/use-active-plan";
+import { useAdhocWeek } from "@/lib/hooks/use-adhoc-week";
+import { useRecipes } from "@/lib/hooks/use-recipes";
+import { getIndicesForDate } from "@/lib/firebase/meal-plans";
+import type { PlanInstance, PlanMeal } from "@/lib/types/meal-plan";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -14,6 +20,28 @@ import {
 import { ImportRecipeModal } from "@/components/recipe/import-recipe-modal";
 import { BookOpen, CalendarDays, ChefHat, Download, Plus, ShoppingCart } from "lucide-react";
 import Link from "next/link";
+
+type MealCategory = "Breakfast" | "Lunch" | "Dinner";
+
+function getNextSlot(now: Date): { targetDate: Date; category: MealCategory } {
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  if (minutes < 8 * 60 + 30) return { targetDate: now, category: "Breakfast" };
+  if (minutes < 14 * 60) return { targetDate: now, category: "Lunch" };
+  if (minutes < 21 * 60) return { targetDate: now, category: "Dinner" };
+  return { targetDate: addDays(now, 1), category: "Breakfast" };
+}
+
+function findMealInInstance(
+  instance: PlanInstance | null,
+  date: Date,
+  category: MealCategory
+): PlanMeal | null {
+  if (!instance) return null;
+  const idx = getIndicesForDate(instance, date);
+  if (!idx) return null;
+  const day = instance.snapshot[idx.weekIndex]?.days[idx.dayIndex];
+  return day?.meals.find((m) => m.category === category) ?? null;
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -162,6 +190,33 @@ export default function DashboardPage() {
    ===================================================================== */
 function KitchenToolDashboard({ firstName }: { firstName: string }) {
   const today = new Date();
+  const { instance } = useActivePlan();
+  const { adhocWeeks } = useAdhocWeek();
+  const { recipes } = useRecipes();
+
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const nextMeal = useMemo(() => {
+    if (!now) return null;
+    const { targetDate, category } = getNextSlot(now);
+    let meal = findMealInInstance(instance, targetDate, category);
+    if (!meal) {
+      for (const w of adhocWeeks) {
+        meal = findMealInInstance(w, targetDate, category);
+        if (meal) break;
+      }
+    }
+    if (!meal) return { meal: null, category, targetDate, photo: null as string | null };
+    const photo =
+      meal.mealPhoto ?? recipes.find((r) => r.id === meal.mealId)?.photoURL ?? null;
+    return { meal, category, targetDate, photo };
+  }, [now, instance, adhocWeeks, recipes]);
+
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(today);
     d.setDate(today.getDate() + i - today.getDay());
@@ -194,20 +249,34 @@ function KitchenToolDashboard({ firstName }: { firstName: string }) {
           className="group relative block overflow-hidden border kt-hair bg-card transition-colors hover:border-primary/40"
           style={{ borderRadius: "var(--radius)" }}
         >
-          <div
-            className="aspect-[16/9] w-full"
-            style={{
-              background:
-                "repeating-linear-gradient(135deg, var(--kt-paper-deep) 0 6px, var(--background) 6px 12px)",
-            }}
-          />
+          {nextMeal?.meal && nextMeal.photo ? (
+            <div className="aspect-[16/9] w-full overflow-hidden">
+              <img
+                src={nextMeal.photo}
+                alt={nextMeal.meal.mealName}
+                className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+              />
+            </div>
+          ) : (
+            <div
+              className="aspect-[16/9] w-full"
+              style={{
+                background:
+                  "repeating-linear-gradient(135deg, var(--kt-paper-deep) 0 6px, var(--background) 6px 12px)",
+              }}
+            />
+          )}
           <div className="p-6 border-t kt-hair">
-            <div className="kt-eyebrow mb-2">Cook tonight</div>
+            <div className="kt-eyebrow mb-2">
+              {nextMeal ? `Up next · ${nextMeal.category}` : "Cook tonight"}
+            </div>
             <h2 className="kt-serif text-3xl font-semibold tracking-tight">
-              Pick up where you left off
+              {nextMeal?.meal ? nextMeal.meal.mealName : "Pick up where you left off"}
             </h2>
             <p className="text-sm text-muted-foreground mt-2">
-              Open your library to continue the current meal plan, or start a fresh cook.
+              {nextMeal?.meal
+                ? `Your planned ${nextMeal.category.toLowerCase()} — tap to open recipes and start cooking.`
+                : "Open your library to continue the current meal plan, or start a fresh cook."}
             </p>
             <div className="flex gap-2 mt-4">
               <Button size="sm" render={<Link href="/recipes" />}>
