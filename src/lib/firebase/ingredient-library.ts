@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   setDoc,
+  updateDoc,
   getDocs,
   deleteDoc,
   query,
@@ -107,6 +108,20 @@ export async function deleteLibraryIngredient(
   ingredientId: string
 ): Promise<void> {
   await deleteDoc(doc(getDb(), COLLECTION, `${userId}_${ingredientId}`));
+}
+
+/**
+ * Update arbitrary fields on an ingredient in the user's library.
+ */
+export async function updateLibraryIngredient(
+  userId: string,
+  ingredientId: string,
+  fields: Partial<Omit<LibraryIngredient, "id" | "userId">>
+): Promise<void> {
+  await updateDoc(doc(getDb(), COLLECTION, `${userId}_${ingredientId}`), {
+    ...fields,
+    lastUsed: serverTimestamp(),
+  });
 }
 
 /**
