@@ -215,6 +215,12 @@ export interface LibraryIngredient {
   /** Whether this ingredient is part of the user's recurring pantry checklist */
   isPantryItem?: boolean;
   /**
+   * User-defined sort position within a (location, section) pair on the shopping list.
+   * Keyed by `${locationId}:${sectionId}`. Floats so inserting between items only
+   * needs to write one document (midpoint of neighbors).
+   */
+  sectionPositions?: Record<string, number>;
+  /**
    * AI-derived conversion factors from non-canonical units to `servingUnit`.
    * Keyed by source unit (e.g. "tsp"). factor × source quantity = target quantity.
    * Populated on first encounter and reused; `targetUnit` is stored explicitly

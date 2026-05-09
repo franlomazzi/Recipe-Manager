@@ -19,6 +19,11 @@ export interface ShoppingItem {
   locationId: string | null;
   /** User-assigned section id within the location */
   sectionId: string | null;
+  /**
+   * User-defined sort position within the current (location, section) pair.
+   * Lower = earlier; null/undefined = unordered (sinks below positioned items).
+   */
+  sectionPosition: number | null;
   /** User-assigned custom category id */
   categoryId: string | null;
   /** Note shown under the item (from library or one-off) */

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useHousehold } from "@/lib/contexts/household-context";
@@ -47,7 +48,10 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -78,7 +82,23 @@ import {
   ChevronDown,
   Package,
   RotateCcw,
+  GripVertical,
+  Wallet,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   addDays,
   format,
@@ -194,6 +214,7 @@ export default function ShoppingListPage() {
   const [customInput, setCustomInput] = useState("");
   const [assigning, setAssigning] = useState<ShoppingItem | null>(null);
   const [editPantryOpen, setEditPantryOpen] = useState(false);
+  const [commitPantryConfirmOpen, setCommitPantryConfirmOpen] = useState(false);
   const [pantryNewName, setPantryNewName] = useState("");
   const [pantryAssigning, setPantryAssigning] = useState<PantryItem | null>(null);
   // Pending scope selection when a partner exists: holds the item to add until
@@ -248,11 +269,23 @@ export default function ShoppingListPage() {
     }
   }, [items, groupBy]);
 
-  // Active items only — checked items disappear into the "Completed" section
+  // Active items only — checked items disappear into the "Completed" section.
+  // When grouping by location, sort by user-defined section position (asc); items
+  // without a position sink to the bottom in alpha order so they stay predictable
+  // until the user drags them.
   function activeSortItems(list: ShoppingItem[]) {
-    return list
-      .filter((i) => !i.checked)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const active = list.filter((i) => !i.checked);
+    if (groupBy !== "location") {
+      return active.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return active.sort((a, b) => {
+      const ap = a.sectionPosition;
+      const bp = b.sectionPosition;
+      if (ap !== null && bp !== null) return ap - bp;
+      if (ap !== null) return -1;
+      if (bp !== null) return 1;
+      return a.name.localeCompare(b.name);
+    });
   }
 
   // All checked items (for the collapsed "Completed" section)
@@ -325,11 +358,15 @@ export default function ShoppingListPage() {
     // Household pantry items tick against the shared household doc so both
     // partners see the update live. Individual and recipe items use personal state.
     if (item?.fromPantry && item.pantryShared && householdId) {
+      // Snapshot cost at tick time so the cost-balance view doesn't drift if
+      // the library price changes later. Falls back through cost → price → 0.
+      const snapshotCost = item.cost ?? item.price ?? 0;
       await toggleSharedPantryCheckedKey(
         householdId,
         weekKey,
         key,
-        sharedPantryCheckedByWeek
+        sharedPantryCheckedByWeek,
+        { uid: user.uid, cost: snapshotCost, name: item.name }
       );
       return;
     }
@@ -393,6 +430,61 @@ export default function ShoppingListPage() {
     }
   }
 
+  // Drag-and-drop reorder within a section (location grouping only).
+  const dragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+
+  async function handleSectionDragEnd(
+    event: DragEndEvent,
+    sectionItems: ShoppingItem[],
+    locationId: string,
+    sectionId: string
+  ) {
+    if (!user) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = sectionItems.findIndex((i) => i.key === active.id);
+    const newIndex = sectionItems.findIndex((i) => i.key === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const moved = sectionItems[oldIndex];
+    if (!moved.linkedLibraryId) {
+      // Custom/unlinked items don't persist position yet.
+      toast.info("Reordering is only supported for library ingredients right now");
+      return;
+    }
+    const lib = libraryItems.find((li) => li.id === moved.linkedLibraryId);
+    if (!lib) return;
+
+    // Compute the position of the dragged item's neighbors in the *new* order
+    // so we can pick a midpoint without rewriting every other item.
+    const reordered = [...sectionItems];
+    const [m] = reordered.splice(oldIndex, 1);
+    reordered.splice(newIndex, 0, m);
+    const before = reordered[newIndex - 1];
+    const after = reordered[newIndex + 1];
+
+    let newPos: number;
+    if (!before && !after) {
+      newPos = 0;
+    } else if (!before) {
+      newPos = (after!.sectionPosition ?? 1) - 1;
+    } else if (!after) {
+      newPos = (before.sectionPosition ?? 0) + 1;
+    } else {
+      const bp = before.sectionPosition ?? 0;
+      const ap = after.sectionPosition ?? bp + 2;
+      newPos = (bp + ap) / 2;
+    }
+
+    const key = `${locationId}:${sectionId}`;
+    const next = { ...(lib.sectionPositions ?? {}), [key]: newPos };
+    try {
+      await updateLibraryIngredient(user.uid, lib.id, { sectionPositions: next });
+    } catch {
+      toast.error("Failed to save new order");
+    }
+  }
+
   /** Persist metadata for an item — globally if linked, one-off if not */
   async function saveAssignment(
     item: ShoppingItem,
@@ -437,6 +529,12 @@ export default function ShoppingListPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save");
     }
+  }
+
+  async function handleSetPantryQuantity(item: ShoppingItem, qty: number | null) {
+    if (!user) return;
+    const existing = (oneOffByWeek[weekKey] ?? {})[item.key] ?? {};
+    await setOneOffMeta(user.uid, weekKey, item.key, { ...existing, quantity: qty }, oneOffByWeek);
   }
 
   async function handleRemoveFromShoppingList(item: ShoppingItem) {
@@ -531,7 +629,7 @@ export default function ShoppingListPage() {
     name: string,
     scope: PantryScope
   ) {
-    if (!user || !householdId) return;
+    if (!user) return;
     const pantryIdSet = new Set(pantryItems.map((p) => p.id));
     const match =
       existing ??
@@ -547,6 +645,7 @@ export default function ShoppingListPage() {
         await updateLibraryIngredient(user.uid, match.id, { isPantryItem: true });
       }
       if (scope === "household") {
+        if (!householdId) return;
         await addPantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), match.id);
       } else {
         await addIndividualPantryItemId(user.uid, individualPantryItemIds, match.id);
@@ -558,6 +657,7 @@ export default function ShoppingListPage() {
 
     const newId = await createPantryLibraryIngredient(user.uid, name);
     if (scope === "household") {
+      if (!householdId) return;
       await addPantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), newId);
     } else {
       await addIndividualPantryItemId(user.uid, individualPantryItemIds, newId);
@@ -578,9 +678,10 @@ export default function ShoppingListPage() {
       shoppingPriceQty: number | null;
     }
   ) {
-    if (!user || !householdId) return;
+    if (!user) return;
     const newId = await createPantryLibraryIngredient(user.uid, name, fields);
     if (scope === "household") {
+      if (!householdId) return;
       await addPantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), newId);
     } else {
       await addIndividualPantryItemId(user.uid, individualPantryItemIds, newId);
@@ -600,10 +701,11 @@ export default function ShoppingListPage() {
     if (match) {
       // Existing library ingredient — keep the old flow
       if (partnerUid) {
+        setPantryNewName("");
         setPendingAdd({ name: match.name, existing: match });
         setPendingScope("household");
       } else {
-        void commitAddPantryItem(match, match.name, "household");
+        void commitAddPantryItem(match, match.name, "individual");
       }
     } else {
       // Brand-new ingredient — open the creation dialog
@@ -783,6 +885,17 @@ export default function ShoppingListPage() {
           )}
         </div>
         <div className="flex gap-2">
+          {partnerUid && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl"
+              render={<Link href="/shopping-list/balance" />}
+            >
+              <Wallet className="mr-1.5 h-3.5 w-3.5" />
+              Cost balance
+            </Button>
+          )}
           {checkedCount > 0 && (
             <Button
               variant="outline"
@@ -1071,29 +1184,65 @@ export default function ShoppingListPage() {
           <Card className="pt-0">
             <CardContent className="p-0">
               {group.sections && group.sections.length > 0 ? (
-                group.sections.map((sec, i) => (
-                  <div key={sec.id}>
-                    {(group.sections!.length > 1 || sec.id !== UNASSIGNED) && (
-                      <div
-                        className={`px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 bg-muted/30 ${
-                          i > 0 ? "border-t" : ""
-                        }`}
-                      >
-                        {sec.label}
-                      </div>
-                    )}
-                    <div className="divide-y">
-                      {sec.items.map((item) => (
-                        <ItemRow
-                          key={item.key}
-                          item={item}
-                          onToggle={() => handleToggle(item.key)}
-                          onAssign={() => setAssigning(item)}
-                        />
-                      ))}
+                group.sections.map((sec, i) => {
+                  const sortable =
+                    groupBy === "location" &&
+                    group.id !== UNASSIGNED &&
+                    sec.id !== UNASSIGNED;
+                  const rows = sec.items.map((item) =>
+                    sortable ? (
+                      <SortableItemRow
+                        key={item.key}
+                        item={item}
+                        onToggle={() => handleToggle(item.key)}
+                        onAssign={() => setAssigning(item)}
+                        onSetQuantity={item.fromPantry ? (qty) => void handleSetPantryQuantity(item, qty) : undefined}
+                      />
+                    ) : (
+                      <ItemRow
+                        key={item.key}
+                        item={item}
+                        onToggle={() => handleToggle(item.key)}
+                        onAssign={() => setAssigning(item)}
+                        onSetQuantity={item.fromPantry ? (qty) => void handleSetPantryQuantity(item, qty) : undefined}
+                      />
+                    )
+                  );
+                  const inner = (
+                    <div className="divide-y">{rows}</div>
+                  );
+                  return (
+                    <div key={sec.id}>
+                      {(group.sections!.length > 1 || sec.id !== UNASSIGNED) && (
+                        <div
+                          className={`px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 bg-muted/30 ${
+                            i > 0 ? "border-t" : ""
+                          }`}
+                        >
+                          {sec.label}
+                        </div>
+                      )}
+                      {sortable ? (
+                        <DndContext
+                          sensors={dragSensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={(e) =>
+                            void handleSectionDragEnd(e, sec.items, group.id, sec.id)
+                          }
+                        >
+                          <SortableContext
+                            items={sec.items.map((it) => it.key)}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            {inner}
+                          </SortableContext>
+                        </DndContext>
+                      ) : (
+                        inner
+                      )}
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="divide-y">
                   {group.items.map((item) => (
@@ -1102,6 +1251,7 @@ export default function ShoppingListPage() {
                       item={item}
                       onToggle={() => handleToggle(item.key)}
                       onAssign={() => setAssigning(item)}
+                      onSetQuantity={item.fromPantry ? (qty) => void handleSetPantryQuantity(item, qty) : undefined}
                     />
                   ))}
                 </div>
@@ -1294,7 +1444,7 @@ export default function ShoppingListPage() {
                 <Button
                   size="sm"
                   className="rounded-xl"
-                  onClick={handleCommitPantry}
+                  onClick={() => setCommitPantryConfirmOpen(true)}
                 >
                   <Plus className="mr-1.5 h-3.5 w-3.5" />
                   Add to shopping list
@@ -1304,6 +1454,31 @@ export default function ShoppingListPage() {
           </Card>
         )}
       </div>
+
+      {/* Confirm add pantry to shopping list dialog */}
+      <Dialog open={commitPantryConfirmOpen} onOpenChange={setCommitPantryConfirmOpen}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Add to shopping list?</DialogTitle>
+            <DialogDescription>
+              Unchecked pantry items will be added to your shopping list for this week.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              onClick={async () => {
+                setCommitPantryConfirmOpen(false);
+                await handleCommitPantry();
+              }}
+            >
+              Add to shopping list
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit pantry dialog */}
       <Dialog open={editPantryOpen} onOpenChange={setEditPantryOpen}>
@@ -1513,17 +1688,78 @@ export default function ShoppingListPage() {
   );
 }
 
-function ItemRow({
+function SortableItemRow({
   item,
   onToggle,
   onAssign,
+  onSetQuantity,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
   onAssign: () => void;
+  onSetQuantity?: (qty: number | null) => void;
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.key });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    background: isDragging ? "var(--muted)" : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="touch-none">
+      <ItemRow
+        item={item}
+        onToggle={onToggle}
+        onAssign={onAssign}
+        onSetQuantity={onSetQuantity}
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
+    </div>
+  );
+}
+
+function ItemRow({
+  item,
+  onToggle,
+  onAssign,
+  onSetQuantity,
+  dragHandleProps,
+}: {
+  item: ShoppingItem;
+  onToggle: () => void;
+  onAssign: () => void;
+  onSetQuantity?: (qty: number | null) => void;
+  dragHandleProps?: React.HTMLAttributes<HTMLButtonElement>;
+}) {
+  const [editingQty, setEditingQty] = useState(false);
+  const [qtyInput, setQtyInput] = useState("");
+
+  function startEditQty() {
+    setQtyInput(item.quantity !== null ? String(item.quantity) : "");
+    setEditingQty(true);
+  }
+
+  function commitQty() {
+    setEditingQty(false);
+    if (!onSetQuantity) return;
+    const parsed = parseFloat(qtyInput);
+    onSetQuantity(isNaN(parsed) || parsed <= 0 ? null : parsed);
+  }
+
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
+      {dragHandleProps && (
+        <button
+          type="button"
+          aria-label="Reorder"
+          className="text-muted-foreground/40 hover:text-foreground transition-colors cursor-grab active:cursor-grabbing -ml-1 p-0.5"
+          {...dragHandleProps}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      )}
       <Checkbox checked={item.checked} onCheckedChange={onToggle} />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
@@ -1534,10 +1770,45 @@ function ItemRow({
           >
             {item.name}
           </span>
-          {item.quantity !== null ? (
-            <span className="text-xs text-muted-foreground shrink-0">
+          {/* Quantity display / inline editor */}
+          {onSetQuantity && editingQty ? (
+            <div className="flex items-baseline gap-1 shrink-0">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={qtyInput}
+                autoFocus
+                onChange={(e) => setQtyInput(e.target.value)}
+                onBlur={commitQty}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); commitQty(); }
+                  if (e.key === "Escape") { setEditingQty(false); }
+                }}
+                className="w-16 h-5 text-xs border border-input rounded px-1 bg-background text-foreground"
+              />
+              {item.unit && (
+                <span className="text-xs text-muted-foreground">{item.unit}</span>
+              )}
+            </div>
+          ) : item.quantity !== null ? (
+            <button
+              type="button"
+              onClick={onSetQuantity ? startEditQty : undefined}
+              title={onSetQuantity ? "Edit quantity (this week only)" : undefined}
+              className={`text-xs text-muted-foreground shrink-0 ${onSetQuantity ? "hover:text-foreground hover:underline transition-colors" : ""}`}
+            >
               {item.quantity} {item.unit}
-            </span>
+            </button>
+          ) : onSetQuantity ? (
+            <button
+              type="button"
+              onClick={startEditQty}
+              title="Set quantity (this week only)"
+              className="text-xs text-muted-foreground/50 shrink-0 hover:text-foreground transition-colors"
+            >
+              {item.unit ? `+ qty (${item.unit})` : "+ qty"}
+            </button>
           ) : item.unit ? (
             <span className="text-xs text-muted-foreground shrink-0">
               {item.unit}

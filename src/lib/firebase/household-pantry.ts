@@ -5,10 +5,15 @@ import {
   onSnapshot,
   serverTimestamp,
   deleteField,
+  Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getDb } from "./config";
-import type { HouseholdPantryState } from "@/lib/types/household";
+import type {
+  HouseholdPantryState,
+  PantryPurchase,
+  PantrySettlement,
+} from "@/lib/types/household";
 
 const HOUSEHOLDS = "households";
 const PANTRY_STATE = "pantryState";
@@ -24,6 +29,8 @@ const EMPTY_STATE: HouseholdPantryState = {
   pantryAddedByWeek: {},
   pantryProcessedByWeek: {},
   pantryCheckedKeysByWeek: {},
+  pantryPurchasesByWeek: {},
+  pantrySettlementsByWeek: {},
 };
 
 export function emptyPantryState(): HouseholdPantryState {
@@ -33,6 +40,8 @@ export function emptyPantryState(): HouseholdPantryState {
     pantryAddedByWeek: {},
     pantryProcessedByWeek: {},
     pantryCheckedKeysByWeek: {},
+    pantryPurchasesByWeek: {},
+    pantrySettlementsByWeek: {},
   };
 }
 
@@ -146,20 +155,74 @@ export async function reopenPantryForWeek(
 
 /**
  * Toggle the checked state for a pantry-originated shopping list item key
- * within a specific week. Both household members share this state.
+ * within a specific week. Both household members share this state. When the
+ * caller provides a `purchase`, the item is being checked ON and we also write
+ * a purchase ledger entry; when omitted, the item is being checked OFF and the
+ * purchase entry is cleared.
  */
 export async function toggleSharedPantryCheckedKey(
   householdId: string,
   weekKey: string,
   key: string,
-  currentMap: Record<string, string[]>
+  currentMap: Record<string, string[]>,
+  purchase?: PantryPurchase
 ): Promise<void> {
   const existing = currentMap[weekKey] ?? [];
-  const next = existing.includes(key)
+  const isCurrentlyChecked = existing.includes(key);
+  const next = isCurrentlyChecked
     ? existing.filter((k) => k !== key)
     : [...existing, key];
-  await patchPantryState(householdId, {
+
+  const patch: Record<string, unknown> = {
     [`pantryCheckedKeysByWeek.${weekKey}`]: next,
+  };
+  // Mirror the toggle in the purchase ledger so the cost-balance view stays in sync.
+  if (isCurrentlyChecked) {
+    patch[`pantryPurchasesByWeek.${weekKey}.${key}`] = deleteField();
+  } else if (purchase) {
+    patch[`pantryPurchasesByWeek.${weekKey}.${key}`] = purchase;
+  }
+  await patchPantryState(householdId, patch);
+}
+
+/** Manually adjust a recorded purchase cost (e.g. user paid less than estimated). */
+export async function updatePantryPurchaseCost(
+  householdId: string,
+  weekKey: string,
+  key: string,
+  cost: number
+): Promise<void> {
+  await patchPantryState(householdId, {
+    [`pantryPurchasesByWeek.${weekKey}.${key}.cost`]: cost,
+  });
+}
+
+/** Record (or overwrite) a per-week settlement: `fromUid` paid `toUid` `amount`. */
+export async function setPantryWeekSettlement(
+  householdId: string,
+  weekKey: string,
+  fromUid: string,
+  toUid: string,
+  amount: number
+): Promise<void> {
+  const settlement: PantrySettlement = {
+    fromUid,
+    toUid,
+    amount,
+    settledAt: Timestamp.now(),
+  };
+  await patchPantryState(householdId, {
+    [`pantrySettlementsByWeek.${weekKey}`]: settlement,
+  });
+}
+
+/** Undo a prior settlement (returns the week to "pending"). */
+export async function clearPantryWeekSettlement(
+  householdId: string,
+  weekKey: string
+): Promise<void> {
+  await patchPantryState(householdId, {
+    [`pantrySettlementsByWeek.${weekKey}`]: deleteField(),
   });
 }
 

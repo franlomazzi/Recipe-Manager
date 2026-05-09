@@ -171,6 +171,7 @@ export async function updateLibraryIngredient(
     shoppingPrice?: number | null;
     shoppingPriceQty?: number | null;
     isPantryItem?: boolean;
+    sectionPositions?: Record<string, number>;
   }
 ): Promise<void> {
   const ref = doc(getDb(), ING_COL, `${userId}_${ingredientId}`);

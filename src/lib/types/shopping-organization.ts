@@ -41,4 +41,6 @@ export interface OneOffMeta {
   categoryId?: string | null;
   note?: string | null;
   price?: number | null;
+  /** One-off quantity override for pantry items — does not change the library ingredient */
+  quantity?: number | null;
 }
