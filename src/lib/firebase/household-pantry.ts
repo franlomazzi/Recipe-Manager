@@ -123,6 +123,17 @@ export async function commitPantryForWeek(
   });
 }
 
+export async function removePantryItemFromWeek(
+  householdId: string,
+  weekKey: string,
+  libraryId: string,
+  currentAddedIds: string[]
+): Promise<void> {
+  await patchPantryState(householdId, {
+    [`pantryAddedByWeek.${weekKey}`]: currentAddedIds.filter((id) => id !== libraryId),
+  });
+}
+
 export async function reopenPantryForWeek(
   householdId: string,
   weekKey: string,

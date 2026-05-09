@@ -202,6 +202,8 @@ export async function createPantryLibraryIngredient(
   userId: string,
   name: string,
   fields: {
+    servingUnit?: string;
+    servingSize?: number;
     shoppingLocationId?: string | null;
     shoppingSectionId?: string | null;
     shoppingCategoryId?: string | null;
@@ -212,12 +214,13 @@ export async function createPantryLibraryIngredient(
 ): Promise<string> {
   const id = crypto.randomUUID();
   const ref = doc(getDb(), ING_COL, `${userId}_${id}`);
+  const { servingUnit = "unit", servingSize = 1, ...rest } = fields;
   const data: Record<string, unknown> = {
     id,
     userId,
     name,
-    servingSize: 1,
-    servingUnit: "unit",
+    servingSize,
+    servingUnit,
     calories: 0,
     protein: 0,
     carbs: 0,
@@ -225,7 +228,7 @@ export async function createPantryLibraryIngredient(
     isPantryItem: true,
     lastUsed: serverTimestamp(),
   };
-  for (const [key, val] of Object.entries(fields)) {
+  for (const [key, val] of Object.entries(rest)) {
     if (val !== undefined) data[key] = val;
   }
   await setDoc(ref, data, { merge: true });

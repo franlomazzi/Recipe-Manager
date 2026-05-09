@@ -65,6 +65,7 @@ interface AggregateContext {
   checkedKeys: Set<string>;
   pantryCheckedKeys: Set<string>;
   oneOffForWeek: Record<string, OneOffMeta>;
+  exclusions: Set<string>;
 }
 
 /**
@@ -82,6 +83,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     checkedKeys,
     pantryCheckedKeys,
     oneOffForWeek,
+    exclusions,
   } = ctx;
 
   const merged = new Map<
@@ -201,7 +203,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     addPantryItem(id, false);
   }
 
-  return Array.from(merged.entries()).map(([key, val]) => {
+  return Array.from(merged.entries()).filter(([key]) => !exclusions.has(key)).map(([key, val]) => {
     // Resolve metadata: prefer linked library item, fall back to one-off override
     const lib = val.linkedLibraryItem;
     const oneOff = oneOffForWeek[key];
@@ -347,10 +349,11 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
   const pantryAddedByWeek = pantryState.pantryAddedByWeek;
   const pantryCheckedByWeek = pantryState.pantryCheckedByWeek;
   const pantryProcessedByWeek = pantryState.pantryProcessedByWeek;
-  const pantryAddedIds = useMemo(
-    () => pantryAddedByWeek[weekKey] ?? pantryAddedByWeek[legacyKey] ?? [],
-    [pantryAddedByWeek, weekKey, legacyKey]
-  );
+  const pantryAddedIds = useMemo(() => {
+    const raw = pantryAddedByWeek[weekKey] ?? pantryAddedByWeek[legacyKey] ?? [];
+    const activeSet = new Set(pantryState.pantryItemIds);
+    return raw.filter((id) => activeSet.has(id));
+  }, [pantryAddedByWeek, weekKey, legacyKey, pantryState.pantryItemIds]);
   const pantryCheckedIds = useMemo(
     () => pantryCheckedByWeek[weekKey] ?? pantryCheckedByWeek[legacyKey] ?? [],
     [pantryCheckedByWeek, weekKey, legacyKey]
@@ -375,16 +378,23 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     () => state?.individualPantryProcessedByWeek ?? {},
     [state]
   );
-  const individualPantryAddedIds = useMemo(
-    () => individualPantryAddedByWeek[weekKey] ?? [],
-    [individualPantryAddedByWeek, weekKey]
-  );
+  const individualPantryAddedIds = useMemo(() => {
+    const raw = individualPantryAddedByWeek[weekKey] ?? [];
+    const activeSet = new Set(individualPantryItemIds);
+    return raw.filter((id) => activeSet.has(id));
+  }, [individualPantryAddedByWeek, weekKey, individualPantryItemIds]);
   const individualPantryCheckedIds = useMemo(
     () => individualPantryCheckedByWeek[weekKey] ?? [],
     [individualPantryCheckedByWeek, weekKey]
   );
   const individualPantryProcessed =
     !!(individualPantryProcessedByWeek[weekKey]);
+
+  const exclusionsByWeek = useMemo(() => state?.exclusionsByWeek ?? {}, [state]);
+  const exclusions = useMemo(
+    () => new Set(exclusionsByWeek[weekKey] ?? []),
+    [exclusionsByWeek, weekKey]
+  );
 
   const sharedPantryCheckedKeys = useMemo(
     () =>
@@ -434,6 +444,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
         checkedKeys,
         pantryCheckedKeys: sharedPantryCheckedKeys,
         oneOffForWeek,
+        exclusions,
       }),
     [
       planOccurrences,
@@ -445,6 +456,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
       checkedKeys,
       sharedPantryCheckedKeys,
       oneOffForWeek,
+      exclusions,
     ]
   );
 
@@ -501,6 +513,8 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     individualPantryAddedIds,
     individualPantryCheckedIds,
     individualPantryProcessed,
+    exclusionsByWeek,
+    exclusions,
     loading,
     hasActivePlan: !!planInstance,
     instance: planInstance ?? null,

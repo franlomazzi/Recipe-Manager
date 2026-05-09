@@ -215,6 +215,29 @@ export async function commitIndividualPantryForWeek(
   });
 }
 
+export async function excludeItemForWeek(
+  userId: string,
+  weekKey: string,
+  itemKey: string,
+  currentExclusions: string[]
+): Promise<void> {
+  if (currentExclusions.includes(itemKey)) return;
+  await patchOrCreate(userId, {
+    [`exclusionsByWeek.${weekKey}`]: [...currentExclusions, itemKey],
+  });
+}
+
+export async function removeIndividualPantryItemFromWeek(
+  userId: string,
+  weekKey: string,
+  libraryId: string,
+  currentAddedIds: string[]
+): Promise<void> {
+  await patchOrCreate(userId, {
+    [`individualPantryAddedByWeek.${weekKey}`]: currentAddedIds.filter((id) => id !== libraryId),
+  });
+}
+
 export async function reopenIndividualPantryForWeek(
   userId: string,
   weekKey: string

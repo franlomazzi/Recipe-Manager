@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useHousehold } from "@/lib/contexts/household-context";
@@ -25,6 +25,7 @@ import {
   toggleSharedPantryCheckedKey,
   addPantryItemId,
   removePantryItemId,
+  removePantryItemFromWeek,
 } from "@/lib/firebase/household-pantry";
 import {
   addIndividualPantryItemId,
@@ -32,6 +33,8 @@ import {
   setIndividualPantryCheckedForWeek,
   commitIndividualPantryForWeek,
   reopenIndividualPantryForWeek,
+  removeIndividualPantryItemFromWeek,
+  excludeItemForWeek,
 } from "@/lib/firebase/shopping-list";
 import { usePantryItems, type PantryScope, type PantryItem } from "@/lib/hooks/use-pantry-items";
 import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
@@ -83,6 +86,7 @@ import {
   startOfWeek,
   differenceInCalendarDays,
 } from "date-fns";
+import { getUnitOptions } from "@/lib/unit-standards";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import { useAdhocWeek } from "@/lib/hooks/use-adhoc-week";
 import { currentWeekMonday } from "@/lib/firebase/meal-plans";
@@ -131,16 +135,25 @@ export default function ShoppingListPage() {
     return { firstMonday, totalWeeks };
   }, [effectiveInstance]);
 
-  const [weekIndex, setWeekIndex] = useState(() => {
-    const planStart = parseISO(effectiveInstance.startDate);
+  const [weekIndex, setWeekIndex] = useState(0);
+
+  // Seed weekIndex to today's week once the active plan instance loads.
+  // The useState initializer above can't do this reliably because `instance`
+  // arrives asynchronously — it's null on first render, so effectiveInstance
+  // would point at the freestyle fallback and compute an incorrect offset.
+  const seededFromInstance = useRef(false);
+  useEffect(() => {
+    if (!instance || seededFromInstance.current) return;
+    seededFromInstance.current = true;
+    const planStart = parseISO(instance.startDate);
     const firstMonday = startOfWeek(planStart, { weekStartsOn: 1 });
-    const planEnd = addDays(planStart, effectiveInstance.snapshot.length * 7 - 1);
+    const planEnd = addDays(planStart, instance.snapshot.length * 7 - 1);
     const lastMonday = startOfWeek(planEnd, { weekStartsOn: 1 });
     const totalWeeks = differenceInCalendarDays(lastMonday, firstMonday) / 7 + 1;
     const todayMonday = startOfWeek(new Date(), { weekStartsOn: 1 });
     const offset = differenceInCalendarDays(todayMonday, firstMonday) / 7;
-    return Math.max(0, Math.min(totalWeeks - 1, offset));
-  });
+    setWeekIndex(Math.max(0, Math.min(totalWeeks - 1, offset)));
+  }, [instance]);
 
   const {
     weekKey,
@@ -156,15 +169,18 @@ export default function ShoppingListPage() {
     pantryCheckedByWeek,
     pantryProcessedByWeek,
     pantryAddedByWeek,
+    pantryAddedIds,
     pantryCheckedIds,
     pantryProcessed,
     sharedPantryCheckedByWeek,
     individualPantryItemIds,
     individualPantryCheckedByWeek,
     individualPantryAddedByWeek,
+    individualPantryAddedIds,
     individualPantryProcessedByWeek,
     individualPantryCheckedIds,
     individualPantryProcessed,
+    exclusionsByWeek,
     loading,
     hasActivePlan,
   } = useShoppingList(weekIndex, effectiveInstance);
@@ -187,6 +203,8 @@ export default function ShoppingListPage() {
     existing?: LibraryIngredient;
   } | null>(null);
   const [pendingScope, setPendingScope] = useState<PantryScope>("household");
+  // Name of a brand-new ingredient being created via the creation dialog
+  const [creatingPantryIngredient, setCreatingPantryIngredient] = useState<string | null>(null);
 
   const weekRange = useMemo(() => {
     const start = addDays(calendarWeekMeta.firstMonday, weekIndex * 7);
@@ -421,6 +439,23 @@ export default function ShoppingListPage() {
     }
   }
 
+  async function handleRemoveFromShoppingList(item: ShoppingItem) {
+    if (!user) return;
+    if (item.fromPantry && item.linkedLibraryId) {
+      if (item.pantryShared) {
+        if (!householdId) return;
+        await removePantryItemFromWeek(householdId, weekKey, item.linkedLibraryId, pantryAddedIds);
+      } else {
+        await removeIndividualPantryItemFromWeek(user.uid, weekKey, item.linkedLibraryId, individualPantryAddedIds);
+      }
+    } else {
+      const currentExclusions = exclusionsByWeek[weekKey] ?? [];
+      await excludeItemForWeek(user.uid, weekKey, item.key, currentExclusions);
+    }
+    setAssigning(null);
+    toast.success("Removed from shopping list");
+  }
+
   // ----- Pantry helpers -----
   async function handleTogglePantry(libraryId: string, scope: PantryScope) {
     if (scope === "household") {
@@ -530,15 +565,50 @@ export default function ShoppingListPage() {
     setPantryNewName("");
   }
 
+  async function commitCreateNewPantryIngredient(
+    name: string,
+    scope: PantryScope,
+    fields: {
+      servingUnit: string;
+      shoppingCategoryId: string | null;
+      shoppingLocationId: string | null;
+      shoppingSectionId: string | null;
+      shoppingNote: string | null;
+      shoppingPrice: number | null;
+      shoppingPriceQty: number | null;
+    }
+  ) {
+    if (!user || !householdId) return;
+    const newId = await createPantryLibraryIngredient(user.uid, name, fields);
+    if (scope === "household") {
+      await addPantryItemId(householdId, pantryItems.filter((p) => p.scope === "household").map((p) => p.id), newId);
+    } else {
+      await addIndividualPantryItemId(user.uid, individualPantryItemIds, newId);
+    }
+    setCreatingPantryIngredient(null);
+    toast.success(`Added ${name} to your pantry`);
+  }
+
   function handleAddPantryItem(existing?: LibraryIngredient) {
     const name = pantryNewName.trim();
     if (!existing && !name) return;
-    if (partnerUid) {
-      // Ask the user to pick a scope before committing.
-      setPendingAdd({ name, existing });
-      setPendingScope("household");
+
+    const match =
+      existing ??
+      libraryItems.find((i) => i.name.trim().toLowerCase() === name.toLowerCase());
+
+    if (match) {
+      // Existing library ingredient — keep the old flow
+      if (partnerUid) {
+        setPendingAdd({ name: match.name, existing: match });
+        setPendingScope("household");
+      } else {
+        void commitAddPantryItem(match, match.name, "household");
+      }
     } else {
-      void commitAddPantryItem(existing, name, "household");
+      // Brand-new ingredient — open the creation dialog
+      setCreatingPantryIngredient(name);
+      setPantryNewName("");
     }
   }
 
@@ -1421,10 +1491,24 @@ export default function ShoppingListPage() {
         item={assigning}
         onClose={() => setAssigning(null)}
         onSave={saveAssignment}
+        onRemove={assigning ? () => handleRemoveFromShoppingList(assigning) : undefined}
         locations={locations}
         categories={categories}
         locationMap={locationMap}
       />
+
+      {/* Create new pantry ingredient dialog */}
+      {creatingPantryIngredient !== null && (
+        <CreatePantryIngredientDialog
+          name={creatingPantryIngredient}
+          partnerUid={partnerUid}
+          locations={locations}
+          categories={categories}
+          locationMap={locationMap}
+          onCancel={() => setCreatingPantryIngredient(null)}
+          onConfirm={(scope, fields) => commitCreateNewPantryIngredient(creatingPantryIngredient, scope, fields)}
+        />
+      )}
     </div>
   );
 }
@@ -1523,6 +1607,7 @@ function AssignDialog<T extends AssignDialogItem>({
   item,
   onClose,
   onSave,
+  onRemove,
   locations,
   categories,
   locationMap,
@@ -1541,6 +1626,7 @@ function AssignDialog<T extends AssignDialogItem>({
       priceQty: number | null;
     }
   ) => Promise<void>;
+  onRemove?: () => Promise<void>;
   locations: import("@/lib/types/shopping-organization").ShoppingLocation[];
   categories: import("@/lib/types/shopping-organization").IngredientCategoryDef[];
   locationMap: Map<string, import("@/lib/types/shopping-organization").ShoppingLocation>;
@@ -1759,14 +1845,30 @@ function AssignDialog<T extends AssignDialogItem>({
 
             {scopeSection}
 
-            <div className="flex gap-2 justify-end pt-2">
-              <Button variant="outline" size="sm" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button size="sm" onClick={handleSave} disabled={saving}>
-                {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                Save
-              </Button>
+            <div className="flex items-center justify-between pt-2">
+              {onRemove ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={() => void onRemove()}
+                  disabled={saving}
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Remove from list
+                </Button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSave} disabled={saving}>
+                  {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  Save
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -1894,5 +1996,260 @@ function PantryAddCombobox({
         </div>
       )}
     </div>
+  );
+}
+
+function CreatePantryIngredientDialog({
+  name,
+  partnerUid,
+  locations,
+  categories,
+  locationMap,
+  onCancel,
+  onConfirm,
+}: {
+  name: string;
+  partnerUid: string | null | undefined;
+  locations: import("@/lib/types/shopping-organization").ShoppingLocation[];
+  categories: import("@/lib/types/shopping-organization").IngredientCategoryDef[];
+  locationMap: Map<string, import("@/lib/types/shopping-organization").ShoppingLocation>;
+  onCancel: () => void;
+  onConfirm: (
+    scope: PantryScope,
+    fields: {
+      servingUnit: string;
+      shoppingCategoryId: string | null;
+      shoppingLocationId: string | null;
+      shoppingSectionId: string | null;
+      shoppingNote: string | null;
+      shoppingPrice: number | null;
+      shoppingPriceQty: number | null;
+    }
+  ) => Promise<void>;
+}) {
+  const [servingUnit, setServingUnit] = useState("unit");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const [sectionId, setSectionId] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+  const [priceInput, setPriceInput] = useState("");
+  const [priceQtyInput, setPriceQtyInput] = useState("");
+  const [scope, setScope] = useState<PantryScope>("household");
+  const [saving, setSaving] = useState(false);
+
+  const unitOptions = getUnitOptions();
+  const sections = locationId ? locationMap.get(locationId)?.sections ?? [] : [];
+
+  async function handleConfirm() {
+    setSaving(true);
+    try {
+      const validSection =
+        sectionId && sections.some((s) => s.id === sectionId) ? sectionId : null;
+      const parsedPrice = priceInput.trim() ? Number(priceInput) : NaN;
+      const parsedPriceQty = priceQtyInput.trim() ? Number(priceQtyInput) : NaN;
+      await onConfirm(scope, {
+        servingUnit,
+        shoppingCategoryId: categoryId,
+        shoppingLocationId: locationId,
+        shoppingSectionId: validSection,
+        shoppingNote: note.trim() || null,
+        shoppingPrice: Number.isFinite(parsedPrice) ? parsedPrice : null,
+        shoppingPriceQty:
+          Number.isFinite(parsedPriceQty) && parsedPriceQty > 0
+            ? parsedPriceQty
+            : null,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New pantry item: {name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground -mt-2">
+            Set up how you use and buy this ingredient. All fields except unit are optional.
+          </p>
+
+          {/* Unit */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Unit</label>
+            <Select value={servingUnit} onValueChange={(v) => v && setServingUnit(v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {unitOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* How much I buy + price */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              I usually buy
+            </label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min="0"
+                value={priceQtyInput}
+                onChange={(e) => setPriceQtyInput(e.target.value)}
+                placeholder="qty"
+                className="flex-1"
+              />
+              <span className="text-sm text-muted-foreground shrink-0">{servingUnit}</span>
+              <span className="text-xs text-muted-foreground shrink-0">for</span>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={priceInput}
+                onChange={(e) => setPriceInput(e.target.value)}
+                placeholder="price"
+                className="w-24"
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              e.g. 500 g for $2.50 — used to estimate cost per recipe.
+            </p>
+          </div>
+
+          {/* Category */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Category</label>
+            <Select value={categoryId ?? ""} onValueChange={(v) => setCategoryId(v || null)}>
+              <SelectTrigger>
+                <span className={categoryId ? "" : "text-muted-foreground"}>
+                  {categoryId
+                    ? (categories.find((c) => c.id === categoryId)?.name ?? "Unknown")
+                    : "None"}
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">None</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Buy at */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Buy at</label>
+            <Select
+              value={locationId ?? ""}
+              onValueChange={(v) => {
+                setLocationId(v || null);
+                setSectionId(null);
+              }}
+            >
+              <SelectTrigger>
+                <span className={locationId ? "" : "text-muted-foreground"}>
+                  {locationId
+                    ? (locations.find((l) => l.id === locationId)?.name ?? "Unknown")
+                    : "None"}
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">None</SelectItem>
+                {locations.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>
+                    {l.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Section — only when location has sections */}
+          {locationId && sections.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Section</label>
+              <Select value={sectionId ?? ""} onValueChange={(v) => setSectionId(v || null)}>
+                <SelectTrigger>
+                  <span className={sectionId ? "" : "text-muted-foreground"}>
+                    {sectionId
+                      ? (sections.find((s) => s.id === sectionId)?.name ?? "Unknown")
+                      : "None"}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None</SelectItem>
+                  {sections.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Note */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Note</label>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. organic, extra ripe…"
+              rows={2}
+            />
+          </div>
+
+          {/* Scope — only when user has a partner */}
+          {partnerUid && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Visibility</label>
+              <div className="flex gap-2">
+                {(["household", "individual"] as PantryScope[]).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setScope(s)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      scope === s
+                        ? s === "household"
+                          ? "border-violet-400 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-600"
+                          : "border-slate-400 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {s === "household" ? "Household" : "Individual"}
+                    <div className="text-[10px] font-normal mt-0.5 opacity-70">
+                      {s === "household" ? "Shared with partner" : "Only visible to you"}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => void handleConfirm()} disabled={saving}>
+              {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              Add to pantry
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
