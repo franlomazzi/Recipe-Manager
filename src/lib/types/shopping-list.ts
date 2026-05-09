@@ -1,6 +1,7 @@
 import type { IngredientCategory } from "./recipe";
 import type { OneOffMeta } from "./shopping-organization";
 import type { Timestamp } from "firebase/firestore";
+import type { ProvenanceStamp } from "./household";
 
 /** A single aggregated shopping item (same name + unit merged) */
 export interface ShoppingItem {
@@ -43,6 +44,12 @@ export interface ShoppingItem {
   /** When fromPantry is true: true = household (synced with partner), false = individual (this user only) */
   pantryShared: boolean;
   checked: boolean;
+  /**
+   * For shared pantry items: present if a household member soft-removed this
+   * item from the week's shopping list. UI renders the row as struck through
+   * with "Removed by X · Restore". Auto-pruned after 24h.
+   */
+  removedStamp?: ProvenanceStamp | null;
   /** Which recipes contributed to this item */
   sources: { recipeId: string; recipeName: string }[];
 }

@@ -38,17 +38,44 @@ export interface PantrySettlement {
   settledAt: Timestamp;
 }
 
+/**
+ * Records who took an action and when. Empty-string `uid` is the sentinel for
+ * legacy entries written before provenance was recorded — readers should treat
+ * it as "unknown actor" and avoid attributing the action in the UI.
+ */
+export interface ProvenanceStamp {
+  uid: string;
+  at: Timestamp;
+}
+
+/**
+ * A per-week set with optional provenance. Two shapes exist on disk:
+ *  - legacy `string[]` (pre-provenance writes); readable, no actor info
+ *  - current `Record<id, ProvenanceStamp>` (every new write uses this shape)
+ * Always read through `idsFromProvenancedSet` / `provenanceMapFor` helpers.
+ */
+export type ProvenancedSet = string[] | Record<string, ProvenanceStamp>;
+
 export interface HouseholdPantryState {
   /** Library ingredient ids that are pantry items. */
   pantryItemIds: string[];
-  /** "I have enough" check state per week (ids checked off). */
-  pantryCheckedByWeek: Record<string, string[]>;
-  /** Pantry items committed to the shopping list per week. */
-  pantryAddedByWeek: Record<string, string[]>;
-  /** Whether the pantry-check section is finalized for a given week. */
-  pantryProcessedByWeek: Record<string, boolean>;
-  /** Per-week shared tick state for pantry-originated shopping items. */
-  pantryCheckedKeysByWeek: Record<string, string[]>;
+  /** "I have enough" check state per week. Stamped with who skipped each item. */
+  pantryCheckedByWeek: Record<string, ProvenancedSet>;
+  /** Pantry items committed to the shopping list per week. Stamped with who added each. */
+  pantryAddedByWeek: Record<string, ProvenancedSet>;
+  /**
+   * Whether the pantry-check section is finalized for a given week.
+   * Legacy `boolean` shape is read as "processed by unknown"; new writes record the actor.
+   */
+  pantryProcessedByWeek: Record<string, boolean | ProvenanceStamp>;
+  /** Per-week shared tick state for pantry-originated shopping items. Stamped with who ticked. */
+  pantryCheckedKeysByWeek: Record<string, ProvenancedSet>;
+  /**
+   * Soft-delete tombstones for items removed from the shopping list this week.
+   * Items in this map are still rendered (struck through with "Removed by X")
+   * so the partner has a chance to restore. Auto-pruned after 24h.
+   */
+  pantryRemovedByWeek?: Record<string, ProvenancedSet>;
   /**
    * Per-week purchase ledger. Outer key = weekKey, inner key = shopping item key.
    * Mirrors pantryCheckedKeysByWeek but with cost + buyer attribution; a key is

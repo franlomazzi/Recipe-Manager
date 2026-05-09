@@ -9,12 +9,19 @@ import {
   subscribeToShoppingListState,
   migrateWeekKey,
 } from "@/lib/firebase/shopping-list";
-import { migratePantryWeekKey } from "@/lib/firebase/household-pantry";
+import {
+  migratePantryWeekKey,
+  idsFromProvenancedSet,
+  provenanceMapFor,
+  processedStampOf,
+  pruneOldPantryRemovals,
+} from "@/lib/firebase/household-pantry";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { normalizeUnit } from "@/lib/unit-standards";
 import { isoWeekKey, isoWeekKeyForOffset, legacyWeekKey } from "@/lib/utils/week-keys";
 import { addDays, parseISO, startOfWeek } from "date-fns";
 import type { Recipe, IngredientCategory, LibraryIngredient } from "@/lib/types/recipe";
+import type { ProvenanceStamp } from "@/lib/types/household";
 import type {
   ShoppingItem,
   ShoppingListState,
@@ -66,6 +73,8 @@ interface AggregateContext {
   pantryCheckedKeys: Set<string>;
   oneOffForWeek: Record<string, OneOffMeta>;
   exclusions: Set<string>;
+  /** Per-libraryId tombstone for shared pantry items soft-removed this week. */
+  pantryRemovedProvenance: Map<string, ProvenanceStamp | null>;
 }
 
 /**
@@ -84,6 +93,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     pantryCheckedKeys,
     oneOffForWeek,
     exclusions,
+    pantryRemovedProvenance,
   } = ctx;
 
   const merged = new Map<
@@ -255,6 +265,12 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
         ? pantryCheckedKeys.has(key)
         : checkedKeys.has(key);
 
+    // Soft-delete tombstone for shared pantry items (only meaningful when linked).
+    const removedStamp =
+      val.fromPantry && val.pantryShared && val.linkedLibraryItem
+        ? pantryRemovedProvenance.get(val.linkedLibraryItem.id) ?? null
+        : null;
+
     return {
       key,
       name: val.name,
@@ -274,6 +290,7 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
       fromPantry: val.fromPantry,
       pantryShared: val.pantryShared,
       checked,
+      removedStamp,
       sources: Array.from(val.sources.entries()).map(([id, info]) => ({
         recipeId: id,
         recipeName:
@@ -360,17 +377,38 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
   const pantryAddedByWeek = pantryState.pantryAddedByWeek;
   const pantryCheckedByWeek = pantryState.pantryCheckedByWeek;
   const pantryProcessedByWeek = pantryState.pantryProcessedByWeek;
-  const pantryAddedIds = useMemo(() => {
-    const raw = pantryAddedByWeek[weekKey] ?? pantryAddedByWeek[legacyKey] ?? [];
-    const activeSet = new Set(pantryState.pantryItemIds);
-    return raw.filter((id) => activeSet.has(id));
-  }, [pantryAddedByWeek, weekKey, legacyKey, pantryState.pantryItemIds]);
-  const pantryCheckedIds = useMemo(
-    () => pantryCheckedByWeek[weekKey] ?? pantryCheckedByWeek[legacyKey] ?? [],
+  // Raw per-week values (legacy `string[]` or current `Record<id, stamp>`).
+  // Pass these to writers so they can preserve provenance on neighboring entries.
+  const pantryAddedRawForWeek = useMemo(
+    () => pantryAddedByWeek[weekKey] ?? pantryAddedByWeek[legacyKey],
+    [pantryAddedByWeek, weekKey, legacyKey]
+  );
+  const pantryCheckedRawForWeek = useMemo(
+    () => pantryCheckedByWeek[weekKey] ?? pantryCheckedByWeek[legacyKey],
     [pantryCheckedByWeek, weekKey, legacyKey]
   );
-  const pantryProcessed =
-    !!(pantryProcessedByWeek[weekKey] ?? pantryProcessedByWeek[legacyKey]);
+  const pantryAddedIds = useMemo(() => {
+    const activeSet = new Set(pantryState.pantryItemIds);
+    return idsFromProvenancedSet(pantryAddedRawForWeek).filter((id) => activeSet.has(id));
+  }, [pantryAddedRawForWeek, pantryState.pantryItemIds]);
+  const pantryCheckedIds = useMemo(
+    () => idsFromProvenancedSet(pantryCheckedRawForWeek),
+    [pantryCheckedRawForWeek]
+  );
+  const pantryAddedProvenance = useMemo(
+    () => provenanceMapFor(pantryAddedRawForWeek),
+    [pantryAddedRawForWeek]
+  );
+  const pantryCheckedProvenance = useMemo(
+    () => provenanceMapFor(pantryCheckedRawForWeek),
+    [pantryCheckedRawForWeek]
+  );
+  const pantryProcessedRaw = pantryProcessedByWeek[weekKey] ?? pantryProcessedByWeek[legacyKey];
+  const pantryProcessed = !!pantryProcessedRaw;
+  const pantryProcessedStamp = useMemo(
+    () => processedStampOf(pantryProcessedRaw),
+    [pantryProcessedRaw]
+  );
 
   // Individual pantry data — sourced from the user's own ShoppingListState doc.
   const individualPantryItemIds = useMemo(
@@ -407,14 +445,45 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     [exclusionsByWeek, weekKey]
   );
 
-  const sharedPantryCheckedKeys = useMemo(
+  // Soft-delete tombstones for shared pantry items this week.
+  const pantryRemovedRawForWeek = useMemo(
     () =>
-      new Set(
-        pantryState.pantryCheckedKeysByWeek[weekKey] ??
-          pantryState.pantryCheckedKeysByWeek[legacyKey] ??
-          []
-      ),
+      pantryState.pantryRemovedByWeek?.[weekKey] ??
+      pantryState.pantryRemovedByWeek?.[legacyKey],
     [pantryState, weekKey, legacyKey]
+  );
+  const pantryRemovedProvenance = useMemo(
+    () => provenanceMapFor(pantryRemovedRawForWeek),
+    [pantryRemovedRawForWeek]
+  );
+
+  // Best-effort 24h sweep: hard-delete tombstones that have aged out.
+  // Runs whenever the week or its tombstones change; the writer no-ops if nothing is stale.
+  useEffect(() => {
+    if (!householdId) return;
+    if (pantryRemovedProvenance.size === 0) return;
+    void pruneOldPantryRemovals(
+      householdId,
+      weekKey,
+      pantryRemovedRawForWeek,
+      pantryAddedRawForWeek,
+      24 * 60 * 60 * 1000
+    );
+  }, [householdId, weekKey, pantryRemovedRawForWeek, pantryAddedRawForWeek, pantryRemovedProvenance]);
+
+  const sharedPantryCheckedRawForWeek = useMemo(
+    () =>
+      pantryState.pantryCheckedKeysByWeek[weekKey] ??
+      pantryState.pantryCheckedKeysByWeek[legacyKey],
+    [pantryState, weekKey, legacyKey]
+  );
+  const sharedPantryCheckedKeys = useMemo(
+    () => new Set(idsFromProvenancedSet(sharedPantryCheckedRawForWeek)),
+    [sharedPantryCheckedRawForWeek]
+  );
+  const sharedPantryCheckedProvenance = useMemo(
+    () => provenanceMapFor(sharedPantryCheckedRawForWeek),
+    [sharedPantryCheckedRawForWeek]
   );
 
   // Best-effort one-time migration: if legacy numeric-offset data exists for
@@ -456,6 +525,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
         pantryCheckedKeys: sharedPantryCheckedKeys,
         oneOffForWeek,
         exclusions,
+        pantryRemovedProvenance,
       }),
     [
       planOccurrences,
@@ -468,6 +538,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
       sharedPantryCheckedKeys,
       oneOffForWeek,
       exclusions,
+      pantryRemovedProvenance,
     ]
   );
 
@@ -516,6 +587,15 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     pantryAddedIds,
     pantryCheckedIds,
     pantryProcessed,
+    pantryProcessedStamp,
+    pantryAddedRawForWeek,
+    pantryCheckedRawForWeek,
+    pantryAddedProvenance,
+    pantryCheckedProvenance,
+    sharedPantryCheckedRawForWeek,
+    sharedPantryCheckedProvenance,
+    pantryRemovedRawForWeek,
+    pantryRemovedProvenance,
     sharedPantryCheckedByWeek: pantryState.pantryCheckedKeysByWeek,
     individualPantryItemIds,
     individualPantryCheckedByWeek,

@@ -20,13 +20,15 @@ import {
   createPantryLibraryIngredient,
 } from "@/lib/firebase/shopping-organization";
 import {
-  setPantryCheckedForWeek,
+  setSharedPantryCheck,
   commitPantryForWeek,
   reopenPantryForWeek,
+  undoLastPantryCommit,
   toggleSharedPantryCheckedKey,
   addPantryItemId,
   removePantryItemId,
-  removePantryItemFromWeek,
+  softRemovePantryItem,
+  restorePantryItem,
 } from "@/lib/firebase/household-pantry";
 import {
   addIndividualPantryItemId,
@@ -36,10 +38,15 @@ import {
   reopenIndividualPantryForWeek,
   removeIndividualPantryItemFromWeek,
   excludeItemForWeek,
+  undoLastIndividualPantryCommit,
 } from "@/lib/firebase/shopping-list";
 import { usePantryItems, type PantryScope, type PantryItem } from "@/lib/hooks/use-pantry-items";
+import { MemberAvatar } from "@/components/shopping/member-avatar";
+import { CommitPantryDialog } from "@/components/shopping/commit-pantry-dialog";
+import { usePartnerTickToast } from "@/lib/hooks/use-partner-tick-toast";
 import { useIngredientLibrary } from "@/lib/hooks/use-ingredient-library";
 import type { LibraryIngredient } from "@/lib/types/recipe";
+import type { Household, ProvenanceStamp } from "@/lib/types/household";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -120,7 +127,7 @@ const UNASSIGNED = "__unassigned__";
 export default function ShoppingListPage() {
   const { user } = useAuth();
   const isKT = useKitchenTool();
-  const { householdId, partnerUid } = useHousehold();
+  const { household, householdId, partnerUid } = useHousehold();
   const { instance } = useActivePlan();
   const { adhocWeeks } = useAdhocWeek();
   const { locations, categories } = useShoppingOrganization();
@@ -192,7 +199,15 @@ export default function ShoppingListPage() {
     pantryAddedIds,
     pantryCheckedIds,
     pantryProcessed,
+    pantryAddedRawForWeek,
+    pantryCheckedRawForWeek,
+    pantryRemovedRawForWeek,
+    pantryAddedProvenance,
+    pantryCheckedProvenance,
+    pantryProcessedStamp,
+    sharedPantryCheckedRawForWeek,
     sharedPantryCheckedByWeek,
+    sharedPantryCheckedProvenance,
     individualPantryItemIds,
     individualPantryCheckedByWeek,
     individualPantryAddedByWeek,
@@ -208,6 +223,15 @@ export default function ShoppingListPage() {
   const { pantryItems } = usePantryItems(individualPantryItemIds);
   const { items: libraryItems } = useIngredientLibrary();
 
+  // Surface a brief toast when the partner ticks a shared item off the list
+  // (throttled so a fast scan at the supermarket doesn't spam notifications).
+  usePartnerTickToast({
+    currentUid: user?.uid,
+    household,
+    sharedPantryCheckedProvenance,
+    items,
+  });
+
   const [groupBy, setGroupBy] = useState<GroupBy>("category");
   const [addRecipeOpen, setAddRecipeOpen] = useState(false);
   const [recipeSearch, setRecipeSearch] = useState("");
@@ -215,6 +239,7 @@ export default function ShoppingListPage() {
   const [assigning, setAssigning] = useState<ShoppingItem | null>(null);
   const [editPantryOpen, setEditPantryOpen] = useState(false);
   const [commitPantryConfirmOpen, setCommitPantryConfirmOpen] = useState(false);
+  const [undoConfirmOpen, setUndoConfirmOpen] = useState(false);
   const [pantryNewName, setPantryNewName] = useState("");
   const [pantryAssigning, setPantryAssigning] = useState<PantryItem | null>(null);
   // Pending scope selection when a partner exists: holds the item to add until
@@ -309,9 +334,12 @@ export default function ShoppingListPage() {
     [customItems]
   );
 
-  const totalItems = items.length + customItems.length;
+  // Soft-removed items are still rendered (so the partner can restore) but
+  // shouldn't contribute to totals, counts, or cost summaries.
+  const activeItems = useMemo(() => items.filter((i) => !i.removedStamp), [items]);
+  const totalItems = activeItems.length + customItems.length;
   const checkedCount =
-    items.filter((i) => i.checked).length +
+    activeItems.filter((i) => i.checked).length +
     customItems.filter((i) => i.checked).length;
 
   // Total estimated cost broken down by origin.
@@ -323,7 +351,7 @@ export default function ShoppingListPage() {
     let recipePriced = 0;
     let pantryTotal = 0;
     let pantryPriced = 0;
-    for (const it of items) {
+    for (const it of activeItems) {
       if (it.fromPantry) {
         const amt = it.cost ?? it.price; // cost first, raw price as fallback
         if (amt !== null) {
@@ -340,13 +368,13 @@ export default function ShoppingListPage() {
     return {
       total: recipeTotal + pantryTotal,
       totalPriced: recipePriced + pantryPriced,
-      totalCount: items.length,
+      totalCount: activeItems.length,
       recipeTotal,
       recipePriced,
       pantryTotal,
       pantryPriced,
     };
-  }, [items]);
+  }, [activeItems]);
 
   const filteredAvailable = availableRecipes.filter((r) =>
     r.title.toLowerCase().includes(recipeSearch.toLowerCase())
@@ -365,7 +393,8 @@ export default function ShoppingListPage() {
         householdId,
         weekKey,
         key,
-        sharedPantryCheckedByWeek,
+        user.uid,
+        sharedPantryCheckedRawForWeek,
         { uid: user.uid, cost: snapshotCost, name: item.name }
       );
       return;
@@ -542,7 +571,14 @@ export default function ShoppingListPage() {
     if (item.fromPantry && item.linkedLibraryId) {
       if (item.pantryShared) {
         if (!householdId) return;
-        await removePantryItemFromWeek(householdId, weekKey, item.linkedLibraryId, pantryAddedIds);
+        // Soft-remove: leaves an inline tombstone the partner can restore.
+        await softRemovePantryItem(
+          householdId,
+          weekKey,
+          item.linkedLibraryId,
+          user.uid,
+          pantryRemovedRawForWeek
+        );
       } else {
         await removeIndividualPantryItemFromWeek(user.uid, weekKey, item.linkedLibraryId, individualPantryAddedIds);
       }
@@ -554,47 +590,121 @@ export default function ShoppingListPage() {
     toast.success("Removed from shopping list");
   }
 
+  async function handleRestoreFromShoppingList(item: ShoppingItem) {
+    if (!householdId || !item.linkedLibraryId) return;
+    await restorePantryItem(
+      householdId,
+      weekKey,
+      item.linkedLibraryId,
+      pantryRemovedRawForWeek
+    );
+    toast.success("Restored");
+  }
+
   // ----- Pantry helpers -----
   async function handleTogglePantry(libraryId: string, scope: PantryScope) {
     if (scope === "household") {
-      if (!householdId) return;
-      const next = pantryCheckedIds.includes(libraryId)
-        ? pantryCheckedIds.filter((id) => id !== libraryId)
-        : [...pantryCheckedIds, libraryId];
-      await setPantryCheckedForWeek(householdId, weekKey, next, pantryCheckedByWeek);
+      if (!householdId || !user) return;
+      const isCurrentlyChecked = pantryCheckedIds.includes(libraryId);
+      const willBeSkipped = !isCurrentlyChecked;
+      // If the user is marking "I have enough" on an item that's already on
+      // the shopping list (re-opened week), also pull it from the list so the
+      // two pieces of state stay coherent. Soft-remove keeps it restorable.
+      const alsoRemove =
+        willBeSkipped && pantryAddedIds.includes(libraryId);
+      await Promise.all([
+        setSharedPantryCheck(
+          householdId,
+          weekKey,
+          libraryId,
+          willBeSkipped,
+          user.uid,
+          pantryCheckedRawForWeek
+        ),
+        alsoRemove
+          ? softRemovePantryItem(
+              householdId,
+              weekKey,
+              libraryId,
+              user.uid,
+              pantryRemovedRawForWeek
+            )
+          : Promise.resolve(),
+      ]);
     } else {
       if (!user) return;
-      const next = individualPantryCheckedIds.includes(libraryId)
-        ? individualPantryCheckedIds.filter((id) => id !== libraryId)
-        : [...individualPantryCheckedIds, libraryId];
-      await setIndividualPantryCheckedForWeek(user.uid, weekKey, next);
+      const willBeSkipped = !individualPantryCheckedIds.includes(libraryId);
+      const next = willBeSkipped
+        ? [...individualPantryCheckedIds, libraryId]
+        : individualPantryCheckedIds.filter((id) => id !== libraryId);
+      // Same coherency rule as household scope (no soft-delete for individual —
+      // it's user-only, so a hard remove is fine).
+      const alsoRemove =
+        willBeSkipped && individualPantryAddedIds.includes(libraryId);
+      await Promise.all([
+        setIndividualPantryCheckedForWeek(user.uid, weekKey, next),
+        alsoRemove
+          ? removeIndividualPantryItemFromWeek(
+              user.uid,
+              weekKey,
+              libraryId,
+              individualPantryAddedIds
+            )
+          : Promise.resolve(),
+      ]);
     }
   }
 
-  async function handleCommitPantry() {
+  async function handleConfirmCommit(opts: {
+    addedHousehold: string[];
+    addedIndividual: string[];
+    skippedHousehold: string[];
+    skippedIndividual: string[];
+  }) {
     if (!householdId || !user) return;
-    const householdToAdd = pantryItems
-      .filter((p) => p.scope === "household" && !pantryCheckedIds.includes(p.id))
-      .map((p) => p.id);
-    const individualToAdd = pantryItems
-      .filter((p) => p.scope === "individual" && !individualPantryCheckedIds.includes(p.id))
-      .map((p) => p.id);
+    const { addedHousehold, addedIndividual, skippedHousehold, skippedIndividual } = opts;
+    const nextIndividualSkips = Array.from(
+      new Set([...individualPantryCheckedIds, ...skippedIndividual])
+    );
     await Promise.all([
-      commitPantryForWeek(householdId, weekKey, householdToAdd, pantryAddedByWeek, pantryProcessedByWeek),
-      commitIndividualPantryForWeek(user.uid, weekKey, individualToAdd),
+      commitPantryForWeek(
+        householdId,
+        weekKey,
+        addedHousehold,
+        user.uid,
+        skippedHousehold,
+        pantryCheckedRawForWeek,
+        pantryRemovedRawForWeek
+      ),
+      commitIndividualPantryForWeek(user.uid, weekKey, addedIndividual),
+      skippedIndividual.length > 0
+        ? setIndividualPantryCheckedForWeek(user.uid, weekKey, nextIndividualSkips)
+        : Promise.resolve(),
     ]);
-    const total = householdToAdd.length + individualToAdd.length;
+    const total = addedHousehold.length + addedIndividual.length;
     toast.success(
-      total ? `Added ${total} pantry item${total === 1 ? "" : "s"}` : "Pantry check complete"
+      total
+        ? `Added ${total} pantry item${total === 1 ? "" : "s"}`
+        : "Pantry check complete"
     );
   }
 
   async function handleReopenPantry() {
     if (!householdId || !user) return;
     await Promise.all([
-      reopenPantryForWeek(householdId, weekKey, pantryProcessedByWeek),
+      reopenPantryForWeek(householdId, weekKey),
       reopenIndividualPantryForWeek(user.uid, weekKey),
     ]);
+  }
+
+  async function handleUndoCommit() {
+    if (!householdId || !user) return;
+    await Promise.all([
+      undoLastPantryCommit(householdId, weekKey),
+      undoLastIndividualPantryCommit(user.uid, weekKey),
+    ]);
+    setUndoConfirmOpen(false);
+    toast.success("Commit undone");
   }
 
   async function handleRemoveFromPantry(libraryId: string, scope: PantryScope) {
@@ -1197,6 +1307,22 @@ export default function ShoppingListPage() {
                         onToggle={() => handleToggle(item.key)}
                         onAssign={() => setAssigning(item)}
                         onSetQuantity={item.fromPantry ? (qty) => void handleSetPantryQuantity(item, qty) : undefined}
+                        onRestore={
+                          item.removedStamp
+                            ? () => void handleRestoreFromShoppingList(item)
+                            : undefined
+                        }
+                        household={household}
+                        addedStamp={
+                          item.fromPantry && item.pantryShared && item.linkedLibraryId
+                            ? pantryAddedProvenance.get(item.linkedLibraryId) ?? null
+                            : null
+                        }
+                        tickedStamp={
+                          item.fromPantry && item.pantryShared && item.checked
+                            ? sharedPantryCheckedProvenance.get(item.key) ?? null
+                            : null
+                        }
                       />
                     ) : (
                       <ItemRow
@@ -1205,6 +1331,22 @@ export default function ShoppingListPage() {
                         onToggle={() => handleToggle(item.key)}
                         onAssign={() => setAssigning(item)}
                         onSetQuantity={item.fromPantry ? (qty) => void handleSetPantryQuantity(item, qty) : undefined}
+                        onRestore={
+                          item.removedStamp
+                            ? () => void handleRestoreFromShoppingList(item)
+                            : undefined
+                        }
+                        household={household}
+                        addedStamp={
+                          item.fromPantry && item.pantryShared && item.linkedLibraryId
+                            ? pantryAddedProvenance.get(item.linkedLibraryId) ?? null
+                            : null
+                        }
+                        tickedStamp={
+                          item.fromPantry && item.pantryShared && item.checked
+                            ? sharedPantryCheckedProvenance.get(item.key) ?? null
+                            : null
+                        }
                       />
                     )
                   );
@@ -1252,6 +1394,22 @@ export default function ShoppingListPage() {
                       onToggle={() => handleToggle(item.key)}
                       onAssign={() => setAssigning(item)}
                       onSetQuantity={item.fromPantry ? (qty) => void handleSetPantryQuantity(item, qty) : undefined}
+                      onRestore={
+                        item.removedStamp
+                          ? () => void handleRestoreFromShoppingList(item)
+                          : undefined
+                      }
+                      household={household}
+                      addedStamp={
+                        item.fromPantry && item.pantryShared && item.linkedLibraryId
+                          ? pantryAddedProvenance.get(item.linkedLibraryId) ?? null
+                          : null
+                      }
+                      tickedStamp={
+                        item.fromPantry && item.pantryShared && item.checked
+                          ? sharedPantryCheckedProvenance.get(item.key) ?? null
+                          : null
+                      }
                     />
                   ))}
                 </div>
@@ -1359,24 +1517,68 @@ export default function ShoppingListPage() {
               <Pencil className="mr-1 h-3 w-3" />
               Edit
             </Button>
-            {pantryProcessed && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={handleReopenPantry}
-              >
-                <RotateCcw className="mr-1 h-3 w-3" />
-                Reopen
-              </Button>
-            )}
           </div>
         </div>
 
         {pantryProcessed ? (
           <Card className="pt-0 border-dashed">
-            <CardContent className="px-4 py-3 text-xs text-muted-foreground">
-              Pantry check complete for this week. Reopen if you need to revise.
+            <CardContent className="px-4 py-3 flex items-center gap-3">
+              {pantryProcessedStamp ? (
+                <MemberAvatar
+                  household={household}
+                  stamp={pantryProcessedStamp}
+                  action="Committed"
+                />
+              ) : null}
+              <div className="flex-1 min-w-0 text-xs text-muted-foreground leading-relaxed">
+                {pantryProcessedStamp && pantryProcessedStamp.uid ? (
+                  <>
+                    {pantryProcessedStamp.uid === user?.uid
+                      ? "You"
+                      : (household?.memberNames?.[pantryProcessedStamp.uid] ?? "Partner")}
+                    {" committed this week"}
+                    {(() => {
+                      const when = pantryProcessedStamp.at && typeof pantryProcessedStamp.at.toMillis === "function"
+                        ? new Date(pantryProcessedStamp.at.toMillis()).toLocaleString(undefined, {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : null;
+                      return when ? ` at ${when}` : "";
+                    })()}
+                    {"."}
+                  </>
+                ) : (
+                  "Pantry check complete for this week."
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={handleReopenPantry}
+                  title="Re-open the pantry-check section so you can change skips"
+                >
+                  <RotateCcw className="mr-1 h-3 w-3" />
+                  Re-open
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                  disabled={sharedPantryCheckedProvenance.size > 0}
+                  onClick={() => setUndoConfirmOpen(true)}
+                  title={
+                    sharedPantryCheckedProvenance.size > 0
+                      ? "Undo unavailable — items have already been purchased"
+                      : "Reverse the commit and remove these items from the shopping list"
+                  }
+                >
+                  <X className="mr-1 h-3 w-3" />
+                  Undo
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ) : pantryItems.length === 0 ? (
@@ -1399,6 +1601,12 @@ export default function ShoppingListPage() {
                     p.scope === "household"
                       ? pantryCheckedIds.includes(p.id)
                       : individualPantryCheckedIds.includes(p.id);
+                  // Provenance is only meaningful for household items — show
+                  // who skipped it so the partner doesn't have to ask.
+                  const skipStamp =
+                    p.scope === "household" && skip
+                      ? pantryCheckedProvenance.get(p.id)
+                      : null;
                   return (
                     <div
                       key={`${p.scope}:${p.id}`}
@@ -1430,6 +1638,13 @@ export default function ShoppingListPage() {
                           </div>
                         )}
                       </div>
+                      {skipStamp && (
+                        <MemberAvatar
+                          household={household}
+                          stamp={skipStamp}
+                          action="Skipped"
+                        />
+                      )}
                       {p.shoppingPrice !== null &&
                         p.shoppingPrice !== undefined && (
                           <span className="text-xs text-muted-foreground shrink-0">
@@ -1455,13 +1670,14 @@ export default function ShoppingListPage() {
         )}
       </div>
 
-      {/* Confirm add pantry to shopping list dialog */}
-      <Dialog open={commitPantryConfirmOpen} onOpenChange={setCommitPantryConfirmOpen}>
+      {/* Confirm undo of last pantry commit */}
+      <Dialog open={undoConfirmOpen} onOpenChange={setUndoConfirmOpen}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Add to shopping list?</DialogTitle>
+            <DialogTitle>Undo this week&rsquo;s pantry commit?</DialogTitle>
             <DialogDescription>
-              Unchecked pantry items will be added to your shopping list for this week.
+              All pantry items committed for this week will be removed from the
+              shopping list. Skipped items stay marked as &ldquo;in stock&rdquo;.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1469,16 +1685,27 @@ export default function ShoppingListPage() {
               Cancel
             </DialogClose>
             <Button
-              onClick={async () => {
-                setCommitPantryConfirmOpen(false);
-                await handleCommitPantry();
-              }}
+              variant="destructive"
+              onClick={() => void handleUndoCommit()}
             >
-              Add to shopping list
+              Undo commit
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Confirm add pantry to shopping list dialog */}
+      <CommitPantryDialog
+        open={commitPantryConfirmOpen}
+        onOpenChange={setCommitPantryConfirmOpen}
+        pantryItems={pantryItems}
+        pantryCheckedIds={pantryCheckedIds}
+        pantryCheckedProvenance={pantryCheckedProvenance}
+        individualPantryCheckedIds={individualPantryCheckedIds}
+        partnerUid={partnerUid}
+        household={household}
+        onConfirm={handleConfirmCommit}
+      />
 
       {/* Edit pantry dialog */}
       <Dialog open={editPantryOpen} onOpenChange={setEditPantryOpen}>
@@ -1693,11 +1920,19 @@ function SortableItemRow({
   onToggle,
   onAssign,
   onSetQuantity,
+  onRestore,
+  household,
+  addedStamp,
+  tickedStamp,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
   onAssign: () => void;
   onSetQuantity?: (qty: number | null) => void;
+  onRestore?: () => void;
+  household?: Household | null;
+  addedStamp?: ProvenanceStamp | null;
+  tickedStamp?: ProvenanceStamp | null;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.key });
@@ -1714,6 +1949,10 @@ function SortableItemRow({
         onToggle={onToggle}
         onAssign={onAssign}
         onSetQuantity={onSetQuantity}
+        onRestore={onRestore}
+        household={household}
+        addedStamp={addedStamp}
+        tickedStamp={tickedStamp}
         dragHandleProps={{ ...attributes, ...listeners }}
       />
     </div>
@@ -1725,14 +1964,27 @@ function ItemRow({
   onToggle,
   onAssign,
   onSetQuantity,
+  onRestore,
   dragHandleProps,
+  household,
+  addedStamp,
+  tickedStamp,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
   onAssign: () => void;
   onSetQuantity?: (qty: number | null) => void;
+  onRestore?: () => void;
   dragHandleProps?: React.HTMLAttributes<HTMLButtonElement>;
+  household?: Household | null;
+  addedStamp?: ProvenanceStamp | null;
+  tickedStamp?: ProvenanceStamp | null;
 }) {
+  const isRemoved = !!item.removedStamp;
+  // Decide which avatar (if any) to show on the right edge of the row.
+  // Priority: ticker (when item is checked) → committer (when not yet ticked).
+  const displayStamp = item.checked && tickedStamp ? tickedStamp : addedStamp;
+  const displayAction = item.checked && tickedStamp ? "Ticked" : "Added";
   const [editingQty, setEditingQty] = useState(false);
   const [qtyInput, setQtyInput] = useState("");
 
@@ -1749,23 +2001,32 @@ function ItemRow({
   }
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
+    <div className={`flex items-center gap-3 px-4 py-2.5 ${isRemoved ? "bg-muted/20" : ""}`}>
       {dragHandleProps && (
         <button
           type="button"
           aria-label="Reorder"
           className="text-muted-foreground/40 hover:text-foreground transition-colors cursor-grab active:cursor-grabbing -ml-1 p-0.5"
+          disabled={isRemoved}
           {...dragHandleProps}
         >
           <GripVertical className="h-4 w-4" />
         </button>
       )}
-      <Checkbox checked={item.checked} onCheckedChange={onToggle} />
+      <Checkbox
+        checked={item.checked}
+        onCheckedChange={onToggle}
+        disabled={isRemoved}
+      />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
           <span
             className={`text-sm font-medium ${
-              item.checked ? "line-through text-muted-foreground/60" : ""
+              isRemoved
+                ? "line-through text-muted-foreground/50"
+                : item.checked
+                ? "line-through text-muted-foreground/60"
+                : ""
             }`}
           >
             {item.name}
@@ -1848,14 +2109,43 @@ function ItemRow({
           </div>
         )}
       </div>
-      <button
-        type="button"
-        className="text-muted-foreground/50 hover:text-foreground transition-colors p-1"
-        onClick={onAssign}
-        title="Assign location, category, note & price"
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </button>
+      {isRemoved ? (
+        <div className="flex items-center gap-2 shrink-0">
+          <MemberAvatar
+            household={household ?? null}
+            stamp={item.removedStamp}
+            action="Removed"
+          />
+          {onRestore && (
+            <button
+              type="button"
+              onClick={onRestore}
+              className="text-xs font-medium text-primary hover:underline"
+              title="Restore this item to the shopping list"
+            >
+              Restore
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {displayStamp && (
+            <MemberAvatar
+              household={household ?? null}
+              stamp={displayStamp}
+              action={displayAction}
+            />
+          )}
+          <button
+            type="button"
+            className="text-muted-foreground/50 hover:text-foreground transition-colors p-1"
+            onClick={onAssign}
+            title="Assign location, category, note & price"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        </>
+      )}
     </div>
   );
 }

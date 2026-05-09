@@ -246,3 +246,19 @@ export async function reopenIndividualPantryForWeek(
     [`individualPantryProcessedByWeek.${weekKey}`]: deleteField(),
   });
 }
+
+/**
+ * Undo the most recent individual pantry commit for a week. Removes the items
+ * from the shopping list and clears the processed flag. The user's per-key
+ * `checkedKeys` are left untouched — those are personal and don't need cleanup
+ * since they target stale `ipantry:` keys harmlessly.
+ */
+export async function undoLastIndividualPantryCommit(
+  userId: string,
+  weekKey: string
+): Promise<void> {
+  await patchOrCreate(userId, {
+    [`individualPantryAddedByWeek.${weekKey}`]: deleteField(),
+    [`individualPantryProcessedByWeek.${weekKey}`]: deleteField(),
+  });
+}
