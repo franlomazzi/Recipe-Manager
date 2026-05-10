@@ -6,6 +6,12 @@ import { AuthProvider } from "@/lib/contexts/auth-context";
 import { HouseholdProvider } from "@/lib/contexts/household-context";
 import { CookingSessionProvider } from "@/lib/contexts/cooking-session-context";
 import { Toaster } from "@/components/ui/sonner";
+import { useAutoTheme } from "@/lib/hooks/use-auto-theme";
+
+function AutoThemeRunner() {
+  useAutoTheme();
+  return null;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -16,6 +22,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       disableTransitionOnChange
       themes={["light", "dark", "system", "kitchen-tool", "kitchen-tool-dark"]}
     >
+      <AutoThemeRunner />
       <ActiveAccountProvider>
         <AuthProvider>
           <HouseholdProvider>

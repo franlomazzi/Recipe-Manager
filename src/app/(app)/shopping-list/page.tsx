@@ -14,6 +14,7 @@ import {
   updateCustomItems,
   clearAllChecked,
   setOneOffMeta,
+  clearExtraRecipesForWeek,
 } from "@/lib/firebase/shopping-list";
 import {
   updateLibraryIngredient,
@@ -240,6 +241,9 @@ export default function ShoppingListPage() {
   const [editPantryOpen, setEditPantryOpen] = useState(false);
   const [commitPantryConfirmOpen, setCommitPantryConfirmOpen] = useState(false);
   const [undoConfirmOpen, setUndoConfirmOpen] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  type ResetScope = "extraRecipes" | "pantryIndividual" | "pantryHousehold" | "everything";
+  const [resetScope, setResetScope] = useState<ResetScope>("everything");
   const [pantryNewName, setPantryNewName] = useState("");
   const [pantryAssigning, setPantryAssigning] = useState<PantryItem | null>(null);
   // Pending scope selection when a partner exists: holds the item to add until
@@ -698,13 +702,34 @@ export default function ShoppingListPage() {
   }
 
   async function handleUndoCommit() {
-    if (!householdId || !user) return;
+    if (!user) return;
     await Promise.all([
-      undoLastPantryCommit(householdId, weekKey),
+      householdId ? undoLastPantryCommit(householdId, weekKey) : Promise.resolve(),
       undoLastIndividualPantryCommit(user.uid, weekKey),
     ]);
     setUndoConfirmOpen(false);
     toast.success("Commit undone");
+  }
+
+  async function handleReset() {
+    if (!user) return;
+    setResetDialogOpen(false);
+    if (resetScope === "extraRecipes" || resetScope === "everything") {
+      await clearExtraRecipesForWeek(user.uid, weekKey);
+    }
+    if (resetScope === "pantryIndividual" || resetScope === "everything") {
+      await undoLastIndividualPantryCommit(user.uid, weekKey);
+    }
+    if ((resetScope === "pantryHousehold" || resetScope === "everything") && householdId) {
+      await undoLastPantryCommit(householdId, weekKey);
+    }
+    if (resetScope === "everything") {
+      await clearAllChecked(user.uid);
+      if (customItems.some((i) => i.checked)) {
+        await updateCustomItems(user.uid, customItems.map((i) => ({ ...i, checked: false })));
+      }
+    }
+    toast.success("Week reset");
   }
 
   async function handleRemoveFromPantry(libraryId: string, scope: PantryScope) {
@@ -959,7 +984,7 @@ export default function ShoppingListPage() {
   }
 
   return (
-    <div className={`p-4 md:p-6 lg:p-8 space-y-5${isKT ? " kt-shop" : ""}`}>
+    <div className={`p-4 md:p-6 lg:p-8 space-y-5 overflow-x-hidden${isKT ? " kt-shop" : ""}`}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1017,6 +1042,15 @@ export default function ShoppingListPage() {
               Clear checked
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-xl"
+            onClick={() => setResetDialogOpen(true)}
+          >
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+            Reset week
+          </Button>
           <Dialog open={addRecipeOpen} onOpenChange={setAddRecipeOpen}>
             <DialogTrigger render={<Button size="sm" className="rounded-xl" />}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
@@ -1441,33 +1475,46 @@ export default function ShoppingListPage() {
           {completedOpen && (
             <Card className="pt-0">
               <CardContent className="divide-y p-0">
-                {completedItems.map((item) => (
-                  <div
-                    key={item.key}
-                    className="flex items-center gap-3 px-4 py-2.5 opacity-70"
-                  >
-                    <Checkbox
-                      checked
-                      onCheckedChange={() => handleToggle(item.key)}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-sm font-medium line-through text-muted-foreground">
-                          {item.name}
-                        </span>
-                        {item.quantity !== null ? (
-                          <span className="text-xs text-muted-foreground/70 shrink-0">
-                            {item.quantity} {item.unit}
+                {completedItems.map((item) => {
+                  const tickedStamp =
+                    item.fromPantry && item.pantryShared
+                      ? sharedPantryCheckedProvenance.get(item.key) ?? null
+                      : null;
+                  return (
+                    <div
+                      key={item.key}
+                      className="flex items-center gap-3 px-4 py-2.5 opacity-70"
+                    >
+                      <Checkbox
+                        checked
+                        onCheckedChange={() => handleToggle(item.key)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-sm font-medium line-through text-muted-foreground">
+                            {item.name}
                           </span>
-                        ) : item.unit ? (
-                          <span className="text-xs text-muted-foreground/70 shrink-0">
-                            {item.unit}
-                          </span>
-                        ) : null}
+                          {item.quantity !== null ? (
+                            <span className="text-xs text-muted-foreground/70 shrink-0">
+                              {item.quantity} {item.unit}
+                            </span>
+                          ) : item.unit ? (
+                            <span className="text-xs text-muted-foreground/70 shrink-0">
+                              {item.unit}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
+                      {tickedStamp && (
+                        <MemberAvatar
+                          household={household}
+                          stamp={tickedStamp}
+                          action="Ticked"
+                        />
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {completedCustomItems.map((item) => (
                   <div
                     key={item.id}
@@ -1567,13 +1614,8 @@ export default function ShoppingListPage() {
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                  disabled={sharedPantryCheckedProvenance.size > 0}
                   onClick={() => setUndoConfirmOpen(true)}
-                  title={
-                    sharedPantryCheckedProvenance.size > 0
-                      ? "Undo unavailable — items have already been purchased"
-                      : "Reverse the commit and remove these items from the shopping list"
-                  }
+                  title="Reverse the commit and remove these items from the shopping list"
                 >
                   <X className="mr-1 h-3 w-3" />
                   Undo
@@ -1689,6 +1731,70 @@ export default function ShoppingListPage() {
               onClick={() => void handleUndoCommit()}
             >
               Undo commit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset this week dialog */}
+      <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+        <DialogContent showCloseButton={false} className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reset this week</DialogTitle>
+            <DialogDescription>
+              Choose what to clear for week {weekIndex + 1}. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {(["extraRecipes", "pantryIndividual", "pantryHousehold", "everything"] as const)
+              .filter((s) => {
+                if (s === "pantryHousehold" && !householdId) return false;
+                return true;
+              })
+              .map((s) => {
+                const labels: Record<string, string> = {
+                  extraRecipes: "Extra recipes only",
+                  pantryIndividual: "My pantry only (individual)",
+                  pantryHousehold: "Household pantry only",
+                  everything: "Everything this week",
+                };
+                const descriptions: Record<string, string> = {
+                  extraRecipes: "Removes manually-added recipes from the list",
+                  pantryIndividual: "Undoes your personal pantry commit",
+                  pantryHousehold: "Undoes the shared pantry commit (affects partner too)",
+                  everything: "Clears recipes, pantry commits, and all checked items",
+                };
+                return (
+                  <label
+                    key={s}
+                    className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                      resetScope === s
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted/40"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reset-scope"
+                      value={s}
+                      checked={resetScope === s}
+                      onChange={() => setResetScope(s)}
+                      className="mt-0.5 accent-primary"
+                    />
+                    <div>
+                      <div className="text-sm font-medium">{labels[s]}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{descriptions[s]}</div>
+                    </div>
+                  </label>
+                );
+              })}
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button variant="destructive" onClick={() => void handleReset()}>
+              Reset
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2094,7 +2200,7 @@ function ItemRow({
           <div className="flex items-center gap-1.5 mt-0.5">
             {item.fromPantry ? (
               <Badge className="h-4 px-1.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
-                Pantry
+                {item.pantryShared ? "Pantry – Household" : "Pantry – Individual"}
               </Badge>
             ) : (
               <Badge className="h-4 px-1.5 text-[10px] font-medium bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/20 dark:text-sky-400 dark:border-sky-800">

@@ -62,6 +62,14 @@ export async function toggleCheckedKey(
   await patchOrCreate(userId, { checkedKeys });
 }
 
+/** Remove all extra (manually-added) recipes for a specific week. */
+export async function clearExtraRecipesForWeek(
+  userId: string,
+  weekKey: string
+): Promise<void> {
+  await patchOrCreate(userId, { [`extraByWeek.${weekKey}`]: [] });
+}
+
 /** Add a recipe entry to a specific week (allows duplicates — use servingMultiplier to scale) */
 export async function addRecipeToWeek(
   userId: string,
