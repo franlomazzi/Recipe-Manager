@@ -18,7 +18,7 @@ import {
 } from "@/lib/firebase/household-pantry";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { normalizeUnit } from "@/lib/unit-standards";
-import { isoWeekKey, isoWeekKeyForOffset, legacyWeekKey } from "@/lib/utils/week-keys";
+import { isoWeekKey, isoWeekKeyForOffset, legacyWeekKey, shoppingCurrentMonday } from "@/lib/utils/week-keys";
 import { addDays, parseISO, startOfWeek } from "date-fns";
 import type { Recipe, IngredientCategory, LibraryIngredient } from "@/lib/types/recipe";
 import type { ProvenanceStamp } from "@/lib/types/household";
@@ -315,7 +315,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
   // Falls back to today's ISO week when there's no active plan.
   const weekKey = useMemo(() => {
     if (instance) return isoWeekKeyForOffset(instance.startDate, weekIndex);
-    return isoWeekKey(new Date());
+    return isoWeekKey(parseISO(shoppingCurrentMonday()));
   }, [instance, weekIndex]);
   const legacyKey = legacyWeekKey(weekIndex);
 

@@ -1,5 +1,6 @@
 import {
   addDays,
+  format,
   getISOWeek,
   getISOWeekYear,
   parseISO,
@@ -23,4 +24,13 @@ export function isoWeekKeyForOffset(
 
 export function legacyWeekKey(offset: number): string {
   return String(offset);
+}
+
+/** On Saturday or Sunday, returns next Monday's ISO date (look-ahead for shopping prep).
+ *  On all other days, returns the current Monday — same as currentWeekMonday(). */
+export function shoppingCurrentMonday(): string {
+  const now = new Date();
+  const base = startOfWeek(now, { weekStartsOn: 1 });
+  const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+  return format(day === 0 || day === 6 ? addDays(base, 7) : base, "yyyy-MM-dd");
 }

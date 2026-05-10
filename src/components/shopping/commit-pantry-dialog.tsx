@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogClose,
@@ -19,18 +18,13 @@ import type { PantryItem } from "@/lib/hooks/use-pantry-items";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Household-scope pantry items only. */
   pantryItems: PantryItem[];
   pantryCheckedIds: string[];
   pantryCheckedProvenance: Map<string, ProvenanceStamp | null>;
-  individualPantryCheckedIds: string[];
   partnerUid: string | null;
   household: Household | null;
-  onConfirm: (opts: {
-    addedHousehold: string[];
-    addedIndividual: string[];
-    skippedHousehold: string[];
-    skippedIndividual: string[];
-  }) => Promise<void>;
+  onConfirm: (opts: { addedHousehold: string[] }) => Promise<void>;
 }
 
 /**
@@ -45,46 +39,30 @@ export function CommitPantryDialog({
   pantryItems,
   pantryCheckedIds,
   pantryCheckedProvenance,
-  individualPantryCheckedIds,
   partnerUid,
   household,
   onConfirm,
 }: Props) {
-  const candidateHousehold = useMemo(
-    () =>
-      pantryItems.filter(
-        (p) => p.scope === "household" && !pantryCheckedIds.includes(p.id)
-      ),
+  // All household-scope items that haven't been skipped yet.
+  const candidates = useMemo(
+    () => pantryItems.filter((p) => !pantryCheckedIds.includes(p.id)),
     [pantryItems, pantryCheckedIds]
   );
-  const candidateIndividual = useMemo(
-    () =>
-      pantryItems.filter(
-        (p) => p.scope === "individual" && !individualPantryCheckedIds.includes(p.id)
-      ),
-    [pantryItems, individualPantryCheckedIds]
-  );
 
-  // Items the partner already skipped — shown as informational footer.
+  // Items the partner already marked as "I have enough" — informational only.
   const partnerSkipped = useMemo(() => {
     if (!partnerUid) return [];
     return pantryItems.filter((p) => {
-      if (p.scope !== "household") return false;
       const stamp = pantryCheckedProvenance.get(p.id);
       return !!stamp && stamp.uid === partnerUid;
     });
   }, [pantryItems, partnerUid, pantryCheckedProvenance]);
 
-  const totalToAdd = candidateHousehold.length + candidateIndividual.length;
+  const totalToAdd = candidates.length;
 
   async function handleSubmit() {
     onOpenChange(false);
-    await onConfirm({
-      addedHousehold: candidateHousehold.map((p) => p.id),
-      addedIndividual: candidateIndividual.map((p) => p.id),
-      skippedHousehold: [],
-      skippedIndividual: [],
-    });
+    await onConfirm({ addedHousehold: candidates.map((p) => p.id) });
   }
 
   return (
@@ -100,21 +78,8 @@ export function CommitPantryDialog({
         </DialogHeader>
 
         {totalToAdd > 0 && (
-          <div className="max-h-[55vh] overflow-y-auto -mx-1 space-y-4">
-            {candidateHousehold.length > 0 && (
-              <Section
-                title="Household"
-                titleBadgeClass="bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800"
-                items={candidateHousehold}
-              />
-            )}
-            {candidateIndividual.length > 0 && (
-              <Section
-                title="Personal"
-                titleBadgeClass="bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700"
-                items={candidateIndividual}
-              />
-            )}
+          <div className="max-h-[55vh] overflow-y-auto -mx-1">
+            <Section items={candidates} />
           </div>
         )}
 
@@ -153,39 +118,19 @@ export function CommitPantryDialog({
   );
 }
 
-function Section({
-  title,
-  titleBadgeClass,
-  items,
-}: {
-  title: string;
-  titleBadgeClass: string;
-  items: PantryItem[];
-}) {
+function Section({ items }: { items: PantryItem[] }) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2 px-1">
-        <Badge
-          className={`h-4 px-1.5 text-[10px] font-medium ${titleBadgeClass}`}
-        >
-          {title}
-        </Badge>
-        <span className="text-[11px] text-muted-foreground">
-          {items.length} item{items.length === 1 ? "" : "s"}
-        </span>
-      </div>
-      <div className="rounded-lg border divide-y">
-        {items.map((p) => (
-          <div key={p.id} className="flex items-center gap-3 px-3 py-2">
-            <span className="text-sm flex-1 min-w-0">{p.name}</span>
-            {p.shoppingPrice !== null && p.shoppingPrice !== undefined && (
-              <span className="text-xs text-muted-foreground shrink-0">
-                ${p.shoppingPrice.toFixed(2)}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
+    <div className="rounded-lg border divide-y">
+      {items.map((p) => (
+        <div key={p.id} className="flex items-center gap-3 px-3 py-2">
+          <span className="text-sm flex-1 min-w-0">{p.name}</span>
+          {p.shoppingPrice !== null && p.shoppingPrice !== undefined && (
+            <span className="text-xs text-muted-foreground shrink-0">
+              ${p.shoppingPrice.toFixed(2)}
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

@@ -119,6 +119,7 @@ import { getUnitOptions } from "@/lib/unit-standards";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import { useAdhocWeek } from "@/lib/hooks/use-adhoc-week";
 import { currentWeekMonday } from "@/lib/firebase/meal-plans";
+import { shoppingCurrentMonday } from "@/lib/utils/week-keys";
 import type { PlanInstance } from "@/lib/types/meal-plan";
 import type { ShoppingItem, CustomShoppingItem } from "@/lib/types/shopping-list";
 import { toast } from "sonner";
@@ -135,17 +136,26 @@ export default function ShoppingListPage() {
   const { locations, categories } = useShoppingOrganization();
 
   // Build a virtual 4-week freestyle instance when there's no active plan.
-  // Mirrors the same construction used on the meal plan page.
+  // On Saturday/Sunday we look ahead to next Monday so a Freestyle user lands on
+  // the same ISO week as a household member whose plan starts that Monday.
   const freestyleInstance = useMemo<PlanInstance>(() => {
-    const monday = currentWeekMonday();
+    const regularMonday = currentWeekMonday();
+    const shoppingMonday = shoppingCurrentMonday();
+    // 0 Mon–Fri, 1 Sat–Sun
+    const weekOffset =
+      differenceInCalendarDays(parseISO(shoppingMonday), parseISO(regularMonday)) / 7;
+    const shifted: typeof adhocWeeks = [
+      ...adhocWeeks.slice(weekOffset),
+      ...Array(weekOffset).fill(null),
+    ];
     return {
       id: "freestyle",
       userId: user?.uid ?? "",
       templateId: "",
       templateName: "Freestyle",
-      snapshot: adhocWeeks.map((w) => w?.snapshot[0] ?? { days: Array.from({ length: 7 }, () => ({ meals: [] })) }),
-      startDate: monday,
-      endDate: format(addDays(parseISO(monday), 27), "yyyy-MM-dd"),
+      snapshot: shifted.map((w) => w?.snapshot[0] ?? { days: Array.from({ length: 7 }, () => ({ meals: [] })) }),
+      startDate: shoppingMonday,
+      endDate: format(addDays(parseISO(shoppingMonday), 27), "yyyy-MM-dd"),
       status: "adhoc",
     };
   }, [adhocWeeks, user?.uid]);
@@ -171,6 +181,8 @@ export default function ShoppingListPage() {
   // arrives asynchronously — it's null on first render, so effectiveInstance
   // would point at the freestyle fallback and compute an incorrect offset.
   const seededFromInstance = useRef(false);
+  const handleToggleRef = useRef<(key: string) => Promise<void>>(async () => {});
+  const handleToggleCustomRef = useRef<(id: string) => Promise<void>>(async () => {});
   useEffect(() => {
     if (!instance || seededFromInstance.current) return;
     seededFromInstance.current = true;
@@ -241,7 +253,8 @@ export default function ShoppingListPage() {
   const [assigning, setAssigning] = useState<ShoppingItem | null>(null);
   const [editPantryOpen, setEditPantryOpen] = useState(false);
   const [commitPantryConfirmOpen, setCommitPantryConfirmOpen] = useState(false);
-  const [undoConfirmOpen, setUndoConfirmOpen] = useState(false);
+  const [undoHouseholdOpen, setUndoHouseholdOpen] = useState(false);
+  const [undoIndividualOpen, setUndoIndividualOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   type ResetScope = "extraRecipes" | "pantryIndividual" | "pantryHousehold" | "everything";
   const [resetScope, setResetScope] = useState<ResetScope>("everything");
@@ -388,6 +401,7 @@ export default function ShoppingListPage() {
   async function handleToggle(key: string) {
     if (!user) return;
     const item = items.find((it) => it.key === key);
+    const wasUnchecked = item && !item.checked;
     // Household pantry items tick against the shared household doc so both
     // partners see the update live. Individual and recipe items use personal state.
     if (item?.fromPantry && item.pantryShared && householdId) {
@@ -402,20 +416,41 @@ export default function ShoppingListPage() {
         sharedPantryCheckedRawForWeek,
         { uid: user.uid, cost: snapshotCost, name: item.name }
       );
+      if (wasUnchecked) {
+        toast(`${item.name} checked`, {
+          action: { label: "Undo", onClick: () => handleToggleRef.current(key) },
+          duration: 4000,
+        });
+      }
       return;
     }
     await toggleCheckedKey(user.uid, checkedKeys, key);
+    if (wasUnchecked) {
+      toast(`${item.name} checked`, {
+        action: { label: "Undo", onClick: () => handleToggleRef.current(key) },
+        duration: 4000,
+      });
+    }
   }
+  handleToggleRef.current = handleToggle;
 
   async function handleToggleCustom(itemId: string) {
     if (!user) return;
+    const customItem = customItems.find((i) => i.id === itemId);
     await updateCustomItems(
       user.uid,
       customItems.map((i) =>
         i.id === itemId ? { ...i, checked: !i.checked } : i
       )
     );
+    if (customItem && !customItem.checked) {
+      toast(`${customItem.name} checked`, {
+        action: { label: "Undo", onClick: () => handleToggleCustomRef.current(itemId) },
+        duration: 4000,
+      });
+    }
   }
+  handleToggleCustomRef.current = handleToggleCustom;
 
   async function handleAddRecipe(recipeId: string) {
     if (!user) return;
@@ -640,56 +675,62 @@ export default function ShoppingListPage() {
     }
   }
 
-  async function handleConfirmCommit(opts: {
-    addedHousehold: string[];
-    addedIndividual: string[];
-    skippedHousehold: string[];
-    skippedIndividual: string[];
-  }) {
+  // Household-only commit — called from CommitPantryDialog (household mode)
+  // or the unified solo commit path.
+  async function handleCommitHouseholdPantry(addedIds: string[]) {
     if (!householdId || !user) return;
-    const { addedHousehold, addedIndividual, skippedHousehold, skippedIndividual } = opts;
-    const nextIndividualSkips = Array.from(
-      new Set([...individualPantryCheckedIds, ...skippedIndividual])
+    await commitPantryForWeek(
+      householdId,
+      weekKey,
+      addedIds,
+      user.uid,
+      [],
+      pantryCheckedRawForWeek,
+      pantryRemovedRawForWeek
     );
-    await Promise.all([
-      commitPantryForWeek(
-        householdId,
-        weekKey,
-        addedHousehold,
-        user.uid,
-        skippedHousehold,
-        pantryCheckedRawForWeek,
-        pantryRemovedRawForWeek
-      ),
-      commitIndividualPantryForWeek(user.uid, weekKey, addedIndividual),
-      skippedIndividual.length > 0
-        ? setIndividualPantryCheckedForWeek(user.uid, weekKey, nextIndividualSkips)
-        : Promise.resolve(),
-    ]);
-    const total = addedHousehold.length + addedIndividual.length;
     toast.success(
-      total
-        ? `Added ${total} pantry item${total === 1 ? "" : "s"}`
-        : "Pantry check complete"
+      addedIds.length
+        ? `Added ${addedIds.length} household item${addedIds.length === 1 ? "" : "s"}`
+        : "Household pantry check complete"
     );
   }
 
-  async function handleReopenPantry() {
-    if (!householdId || !user) return;
-    await Promise.all([
-      reopenPantryForWeek(householdId, weekKey),
-      reopenIndividualPantryForWeek(user.uid, weekKey),
-    ]);
+  // Individual-only commit — called directly (no dialog).
+  async function handleCommitIndividualPantry() {
+    if (!user) return;
+    const toAdd = pantryItems
+      .filter((p) => p.scope === "individual" && !individualPantryCheckedIds.includes(p.id))
+      .map((p) => p.id);
+    await commitIndividualPantryForWeek(user.uid, weekKey, toAdd);
+    toast.success(
+      toAdd.length
+        ? `Added ${toAdd.length} personal item${toAdd.length === 1 ? "" : "s"}`
+        : "Personal pantry check complete"
+    );
   }
 
-  async function handleUndoCommit() {
+  async function handleReopenHouseholdPantry() {
+    if (!householdId) return;
+    await reopenPantryForWeek(householdId, weekKey);
+  }
+
+  async function handleReopenIndividualPantry() {
     if (!user) return;
-    await Promise.all([
-      householdId ? undoLastPantryCommit(householdId, weekKey) : Promise.resolve(),
-      undoLastIndividualPantryCommit(user.uid, weekKey),
-    ]);
-    setUndoConfirmOpen(false);
-    toast.success("Commit undone");
+    await reopenIndividualPantryForWeek(user.uid, weekKey);
+  }
+
+  async function handleUndoHouseholdCommit() {
+    if (!householdId) return;
+    await undoLastPantryCommit(householdId, weekKey);
+    setUndoHouseholdOpen(false);
+    toast.success("Household commit undone");
+  }
+
+  async function handleUndoIndividualCommit() {
+    if (!user) return;
+    await undoLastIndividualPantryCommit(user.uid, weekKey);
+    setUndoIndividualOpen(false);
+    toast.success("Personal commit undone");
   }
 
   async function handleReset() {
@@ -1529,9 +1570,15 @@ export default function ShoppingListPage() {
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
             <Package className="h-3 w-3" />
             Pantry check
-            {!pantryProcessed && pantryItems.length > 0 && (
+            {pantryItems.length > 0 && (
               <span className="text-muted-foreground/50 font-normal normal-case">
-                ({pantryItems.length - pantryCheckedIds.length - individualPantryCheckedIds.length} need shopping)
+                ({(() => {
+                  const householdPending = pantryProcessed ? 0 :
+                    pantryItems.filter(p => p.scope === "household" && !pantryCheckedIds.includes(p.id)).length;
+                  const individualPending = individualPantryProcessed ? 0 :
+                    pantryItems.filter(p => p.scope === "individual" && !individualPantryCheckedIds.includes(p.id)).length;
+                  return householdPending + individualPending;
+                })()} need shopping)
               </span>
             )}
           </h3>
@@ -1548,169 +1595,208 @@ export default function ShoppingListPage() {
           </div>
         </div>
 
-        {pantryProcessed ? (
-          <Card className="pt-0 border-dashed">
-            <CardContent className="px-4 py-3 flex items-center gap-3">
-              {pantryProcessedStamp ? (
-                <MemberAvatar
-                  household={household}
-                  stamp={pantryProcessedStamp}
-                  action="Committed"
-                />
-              ) : null}
-              <div className="flex-1 min-w-0 text-xs text-muted-foreground leading-relaxed">
-                {pantryProcessedStamp && pantryProcessedStamp.uid ? (
-                  <>
-                    {pantryProcessedStamp.uid === user?.uid
-                      ? "You"
-                      : (household?.memberNames?.[pantryProcessedStamp.uid] ?? "Partner")}
-                    {" committed this week"}
-                    {(() => {
-                      const when = pantryProcessedStamp.at && typeof pantryProcessedStamp.at.toMillis === "function"
-                        ? new Date(pantryProcessedStamp.at.toMillis()).toLocaleString(undefined, {
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
-                        : null;
-                      return when ? ` at ${when}` : "";
-                    })()}
-                    {"."}
-                  </>
-                ) : (
-                  "Pantry check complete for this week."
-                )}
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={handleReopenPantry}
-                  title="Re-open the pantry-check section so you can change skips"
-                >
-                  <RotateCcw className="mr-1 h-3 w-3" />
-                  Re-open
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                  onClick={() => setUndoConfirmOpen(true)}
-                  title="Reverse the commit and remove these items from the shopping list"
-                >
-                  <X className="mr-1 h-3 w-3" />
-                  Undo
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ) : pantryItems.length === 0 ? (
+        {pantryItems.length === 0 ? (
           <Card className="pt-0 border-dashed">
             <CardContent className="px-4 py-3 text-xs text-muted-foreground">
               No pantry items yet. Click <strong>Edit</strong> to add the staples
               you check before each shop.
             </CardContent>
           </Card>
+        ) : partnerUid ? (
+          // ── Household mode: two independent subsections ──────────────────
+          <div className="space-y-3">
+            {/* Household subsection */}
+            {(() => {
+              const householdItems = pantryItems.filter(p => p.scope === "household");
+              if (householdItems.length === 0) return null;
+              return (
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-600 dark:text-violet-400 px-0.5">
+                    Household
+                  </p>
+                  {pantryProcessed ? (
+                    <PantryCommittedBanner
+                      stamp={pantryProcessedStamp}
+                      currentUid={user?.uid}
+                      household={household}
+                      onReopen={handleReopenHouseholdPantry}
+                      onUndo={() => setUndoHouseholdOpen(true)}
+                    />
+                  ) : (
+                    <Card className="pt-0">
+                      <CardContent className="p-0">
+                        <div className="px-4 py-2 text-[11px] text-muted-foreground border-b bg-muted/30">
+                          Tick the items you have enough of. The rest will be added to
+                          your shopping list.
+                        </div>
+                        <div className="divide-y">
+                          {householdItems.map((p) => {
+                            const skip = pantryCheckedIds.includes(p.id);
+                            const skipStamp = skip ? pantryCheckedProvenance.get(p.id) : null;
+                            return (
+                              <PantryCheckRow
+                                key={p.id}
+                                item={p}
+                                skip={skip}
+                                skipStamp={skipStamp ?? null}
+                                household={household}
+                                onToggle={() => handleTogglePantry(p.id, p.scope)}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="px-4 py-3 border-t flex justify-end">
+                          <Button
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={() => setCommitPantryConfirmOpen(true)}
+                          >
+                            <Plus className="mr-1.5 h-3.5 w-3.5" />
+                            Add household items
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Individual subsection */}
+            {(() => {
+              const individualItems = pantryItems.filter(p => p.scope === "individual");
+              if (individualItems.length === 0) return null;
+              return (
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-0.5">
+                    My Pantry
+                  </p>
+                  {individualPantryProcessed ? (
+                    <PantryCommittedBanner
+                      stamp={null}
+                      currentUid={user?.uid}
+                      household={household}
+                      personal
+                      onReopen={handleReopenIndividualPantry}
+                      onUndo={() => setUndoIndividualOpen(true)}
+                    />
+                  ) : (
+                    <Card className="pt-0">
+                      <CardContent className="p-0">
+                        <div className="divide-y">
+                          {individualItems.map((p) => {
+                            const skip = individualPantryCheckedIds.includes(p.id);
+                            return (
+                              <PantryCheckRow
+                                key={p.id}
+                                item={p}
+                                skip={skip}
+                                skipStamp={null}
+                                household={null}
+                                onToggle={() => handleTogglePantry(p.id, p.scope)}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="px-4 py-3 border-t flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-xl"
+                            onClick={() => void handleCommitIndividualPantry()}
+                          >
+                            <Plus className="mr-1.5 h-3.5 w-3.5" />
+                            Add my items
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
         ) : (
-          <Card className="pt-0">
-            <CardContent className="p-0">
-              <div className="px-4 py-2 text-[11px] text-muted-foreground border-b bg-muted/30">
-                Tick the items you have enough of. The rest will be added to
-                your shopping list.
-              </div>
-              <div className="divide-y">
-                {pantryItems.map((p) => {
-                  const skip =
-                    p.scope === "household"
-                      ? pantryCheckedIds.includes(p.id)
-                      : individualPantryCheckedIds.includes(p.id);
-                  // Provenance is only meaningful for household items — show
-                  // who skipped it so the partner doesn't have to ask.
-                  const skipStamp =
-                    p.scope === "household" && skip
-                      ? pantryCheckedProvenance.get(p.id)
-                      : null;
-                  return (
-                    <div
-                      key={`${p.scope}:${p.id}`}
-                      className="flex items-center gap-3 px-4 py-2.5"
-                    >
-                      <Checkbox
-                        checked={skip}
-                        onCheckedChange={() => handleTogglePantry(p.id, p.scope)}
+          // ── Solo mode: unified individual-only section ────────────────────
+          individualPantryProcessed ? (
+            <PantryCommittedBanner
+              stamp={null}
+              currentUid={user?.uid}
+              household={null}
+              personal
+              onReopen={handleReopenIndividualPantry}
+              onUndo={() => setUndoIndividualOpen(true)}
+            />
+          ) : (
+            <Card className="pt-0">
+              <CardContent className="p-0">
+                <div className="px-4 py-2 text-[11px] text-muted-foreground border-b bg-muted/30">
+                  Tick the items you have enough of. The rest will be added to
+                  your shopping list.
+                </div>
+                <div className="divide-y">
+                  {pantryItems.map((p) => {
+                    const skip = individualPantryCheckedIds.includes(p.id);
+                    return (
+                      <PantryCheckRow
+                        key={p.id}
+                        item={p}
+                        skip={skip}
+                        skipStamp={null}
+                        household={null}
+                        onToggle={() => handleTogglePantry(p.id, p.scope)}
                       />
-                      <div className="flex-1 min-w-0">
-                        <span
-                          className={`text-sm ${
-                            skip ? "line-through text-muted-foreground/60" : ""
-                          }`}
-                        >
-                          {p.name}
-                        </span>
-                        {partnerUid && (
-                          <div className="mt-0.5">
-                            {p.scope === "household" ? (
-                              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800">
-                                Household
-                              </Badge>
-                            ) : (
-                              <Badge className="h-4 px-1.5 text-[10px] font-medium bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700">
-                                Individual
-                              </Badge>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      {skipStamp && (
-                        <MemberAvatar
-                          household={household}
-                          stamp={skipStamp}
-                          action="Skipped"
-                        />
-                      )}
-                      {p.shoppingPrice !== null &&
-                        p.shoppingPrice !== undefined && (
-                          <span className="text-xs text-muted-foreground shrink-0">
-                            ${p.shoppingPrice.toFixed(2)}
-                          </span>
-                        )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="px-4 py-3 border-t flex justify-end">
-                <Button
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => setCommitPantryConfirmOpen(true)}
-                >
-                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  Add to shopping list
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                    );
+                  })}
+                </div>
+                <div className="px-4 py-3 border-t flex justify-end">
+                  <Button
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={() => void handleCommitIndividualPantry()}
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add to shopping list
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )
         )}
       </div>
 
-      {/* Confirm undo of last pantry commit */}
-      <Dialog open={undoConfirmOpen} onOpenChange={setUndoConfirmOpen}>
+      {/* Undo household pantry commit */}
+      <Dialog open={undoHouseholdOpen} onOpenChange={setUndoHouseholdOpen}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Undo this week&rsquo;s pantry commit?</DialogTitle>
+            <DialogTitle>Undo household pantry commit?</DialogTitle>
             <DialogDescription>
-              All pantry items committed for this week will be removed from the
-              shopping list. Skipped items stay marked as &ldquo;in stock&rdquo;.
+              Household pantry items committed for this week will be removed from
+              the shopping list. Skip flags stay intact.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              variant="destructive"
-              onClick={() => void handleUndoCommit()}
-            >
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button variant="destructive" onClick={() => void handleUndoHouseholdCommit()}>
+              Undo commit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Undo individual pantry commit */}
+      <Dialog open={undoIndividualOpen} onOpenChange={setUndoIndividualOpen}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Undo personal pantry commit?</DialogTitle>
+            <DialogDescription>
+              Your personal pantry items committed for this week will be removed
+              from the shopping list.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button variant="destructive" onClick={() => void handleUndoIndividualCommit()}>
               Undo commit
             </Button>
           </DialogFooter>
@@ -1781,17 +1867,16 @@ export default function ShoppingListPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm add pantry to shopping list dialog */}
+      {/* Confirm add household pantry items to shopping list */}
       <CommitPantryDialog
         open={commitPantryConfirmOpen}
         onOpenChange={setCommitPantryConfirmOpen}
-        pantryItems={pantryItems}
+        pantryItems={pantryItems.filter((p) => p.scope === "household")}
         pantryCheckedIds={pantryCheckedIds}
         pantryCheckedProvenance={pantryCheckedProvenance}
-        individualPantryCheckedIds={individualPantryCheckedIds}
         partnerUid={partnerUid}
         household={household}
-        onConfirm={handleConfirmCommit}
+        onConfirm={({ addedHousehold }) => handleCommitHouseholdPantry(addedHousehold)}
       />
 
       {/* Edit pantry dialog */}
@@ -2899,5 +2984,111 @@ function CreatePantryIngredientDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Pantry section helpers ───────────────────────────────────────────────────
+
+function PantryCheckRow({
+  item,
+  skip,
+  skipStamp,
+  household,
+  onToggle,
+}: {
+  item: import("@/lib/hooks/use-pantry-items").PantryItem;
+  skip: boolean;
+  skipStamp: ProvenanceStamp | null;
+  household: Household | null;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5">
+      <Checkbox checked={skip} onCheckedChange={onToggle} />
+      <div className="flex-1 min-w-0">
+        <span className={`text-sm ${skip ? "line-through text-muted-foreground/60" : ""}`}>
+          {item.name}
+        </span>
+      </div>
+      {skipStamp && (
+        <MemberAvatar household={household} stamp={skipStamp} action="Skipped" />
+      )}
+      {item.shoppingPrice !== null && item.shoppingPrice !== undefined && (
+        <span className="text-xs text-muted-foreground shrink-0">
+          ${item.shoppingPrice.toFixed(2)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PantryCommittedBanner({
+  stamp,
+  currentUid,
+  household,
+  personal = false,
+  onReopen,
+  onUndo,
+}: {
+  stamp: ProvenanceStamp | null;
+  currentUid: string | undefined;
+  household: Household | null;
+  personal?: boolean;
+  onReopen: () => void;
+  onUndo: () => void;
+}) {
+  return (
+    <Card className="pt-0 border-dashed">
+      <CardContent className="px-4 py-3 flex items-center gap-3">
+        {stamp && <MemberAvatar household={household} stamp={stamp} action="Committed" />}
+        <div className="flex-1 min-w-0 text-xs text-muted-foreground leading-relaxed">
+          {personal ? (
+            "Your personal pantry items are committed for this week."
+          ) : stamp?.uid ? (
+            <>
+              {stamp.uid === currentUid
+                ? "You"
+                : (household?.memberNames?.[stamp.uid] ?? "Partner")}
+              {" committed this week"}
+              {(() => {
+                const when =
+                  stamp.at && typeof stamp.at.toMillis === "function"
+                    ? new Date(stamp.at.toMillis()).toLocaleString(undefined, {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : null;
+                return when ? ` at ${when}` : "";
+              })()}
+              {"."}
+            </>
+          ) : (
+            "Pantry check complete for this week."
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={onReopen}
+            title="Re-open so you can change skips"
+          >
+            <RotateCcw className="mr-1 h-3 w-3" />
+            Re-open
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+            onClick={onUndo}
+            title="Reverse this commit"
+          >
+            <X className="mr-1 h-3 w-3" />
+            Undo
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
