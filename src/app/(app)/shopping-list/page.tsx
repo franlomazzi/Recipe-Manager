@@ -105,6 +105,7 @@ import {
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
+  arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -479,40 +480,20 @@ export default function ShoppingListPage() {
     const newIndex = sectionItems.findIndex((i) => i.key === over.id);
     if (oldIndex < 0 || newIndex < 0) return;
 
-    const moved = sectionItems[oldIndex];
-    if (!moved.linkedLibraryId) {
-      // Custom/unlinked items don't persist position yet.
-      toast.info("Reordering is only supported for library ingredients right now");
-      return;
-    }
-    const lib = libraryItems.find((li) => li.id === moved.linkedLibraryId);
-    if (!lib) return;
+    const reordered = arrayMove(sectionItems, oldIndex, newIndex);
+    const posKey = `${locationId}:${sectionId}`;
 
-    // Compute the position of the dragged item's neighbors in the *new* order
-    // so we can pick a midpoint without rewriting every other item.
-    const reordered = [...sectionItems];
-    const [m] = reordered.splice(oldIndex, 1);
-    reordered.splice(newIndex, 0, m);
-    const before = reordered[newIndex - 1];
-    const after = reordered[newIndex + 1];
+    const writes = reordered.flatMap((item, idx) => {
+      if (!item.linkedLibraryId) return [];
+      const lib = libraryItems.find((li) => li.id === item.linkedLibraryId);
+      if (!lib) return [];
+      return [updateLibraryIngredient(user.uid, lib.id, {
+        sectionPositions: { ...(lib.sectionPositions ?? {}), [posKey]: idx },
+      })];
+    });
 
-    let newPos: number;
-    if (!before && !after) {
-      newPos = 0;
-    } else if (!before) {
-      newPos = (after!.sectionPosition ?? 1) - 1;
-    } else if (!after) {
-      newPos = (before.sectionPosition ?? 0) + 1;
-    } else {
-      const bp = before.sectionPosition ?? 0;
-      const ap = after.sectionPosition ?? bp + 2;
-      newPos = (bp + ap) / 2;
-    }
-
-    const key = `${locationId}:${sectionId}`;
-    const next = { ...(lib.sectionPositions ?? {}), [key]: newPos };
     try {
-      await updateLibraryIngredient(user.uid, lib.id, { sectionPositions: next });
+      await Promise.all(writes);
     } catch {
       toast.error("Failed to save new order");
     }
@@ -2049,7 +2030,7 @@ function SortableItemRow({
     background: isDragging ? "var(--muted)" : undefined,
   };
   return (
-    <div ref={setNodeRef} style={style} className="touch-none">
+    <div ref={setNodeRef} style={style}>
       <ItemRow
         item={item}
         onToggle={onToggle}
@@ -2112,7 +2093,7 @@ function ItemRow({
         <button
           type="button"
           aria-label="Reorder"
-          className="text-muted-foreground/40 hover:text-foreground transition-colors cursor-grab active:cursor-grabbing -ml-1 p-0.5"
+          className="text-muted-foreground/40 hover:text-foreground transition-colors cursor-grab active:cursor-grabbing -ml-1 p-0.5 touch-none"
           disabled={isRemoved}
           {...dragHandleProps}
         >
@@ -2472,19 +2453,8 @@ function AssignDialog<T extends AssignDialogItem>({
                 Purchase price
               </label>
               <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  min="0"
-                  value={priceInput}
-                  onChange={(e) => setPriceInput(e.target.value)}
-                  placeholder="0.00"
-                  className={item.isLinked ? "flex-1" : ""}
-                />
                 {item.isLinked && (
                   <>
-                    <span className="text-xs text-muted-foreground shrink-0">for</span>
                     <Input
                       type="number"
                       inputMode="decimal"
@@ -2500,8 +2470,19 @@ function AssignDialog<T extends AssignDialogItem>({
                         {item.unit}
                       </span>
                     )}
+                    <span className="text-xs text-muted-foreground shrink-0">for</span>
                   </>
                 )}
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  value={priceInput}
+                  onChange={(e) => setPriceInput(e.target.value)}
+                  placeholder="0.00"
+                  className={item.isLinked ? "flex-1" : ""}
+                />
               </div>
               <p className="text-[10px] text-muted-foreground">
                 {item.isLinked

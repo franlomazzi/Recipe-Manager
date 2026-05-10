@@ -44,7 +44,7 @@ export function useShoppingOrganization() {
       user.uid,
       partnerUid,
       (cats) => {
-        setCategories(cats);
+        setCategories([...cats].sort((a, b) => a.name.localeCompare(b.name)));
         catLoaded = true;
         updateLoading();
       }

@@ -3,7 +3,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useKioskSettings } from "@/lib/hooks/use-kiosk-settings";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
-import { MEAL_CATEGORIES, type PlanMeal } from "@/lib/types/meal-plan";
+import { useAdhocWeek } from "@/lib/hooks/use-adhoc-week";
+import { getIndicesForDate } from "@/lib/firebase/meal-plans";
+import {
+  MEAL_CATEGORIES,
+  type PlanInstance,
+  type PlanMeal,
+} from "@/lib/types/meal-plan";
+
+function dayMealsFromInstance(
+  instance: PlanInstance | null,
+  date: Date
+): PlanMeal[] {
+  if (!instance) return [];
+  const idx = getIndicesForDate(instance, date);
+  if (!idx) return [];
+  return instance.snapshot[idx.weekIndex]?.days[idx.dayIndex]?.meals ?? [];
+}
 
 function formatTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -23,7 +39,8 @@ const CATEGORY_ORDER: Record<string, number> = Object.fromEntries(
 
 export function Screensaver() {
   const { settings } = useKioskSettings();
-  const { instance, todayIndices } = useActivePlan();
+  const { instance } = useActivePlan();
+  const { adhocWeeks } = useAdhocWeek();
   const [active, setActive] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [drift, setDrift] = useState({ x: 0, y: 0 });
@@ -71,16 +88,22 @@ export function Screensaver() {
   }, [active]);
 
   const todaysMeals = useMemo<PlanMeal[]>(() => {
-    if (!instance || !todayIndices) return [];
-    const week = instance.snapshot[todayIndices.weekIndex];
-    if (!week) return [];
-    const day = week.days[todayIndices.dayIndex];
-    if (!day) return [];
-    return [...day.meals].sort(
+    const today = now;
+    let meals = dayMealsFromInstance(instance, today);
+    if (meals.length === 0) {
+      for (const w of adhocWeeks) {
+        const found = dayMealsFromInstance(w, today);
+        if (found.length > 0) {
+          meals = found;
+          break;
+        }
+      }
+    }
+    return [...meals].sort(
       (a, b) =>
         (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99)
     );
-  }, [instance, todayIndices]);
+  }, [instance, adhocWeeks, now]);
 
   const nextMeal = useMemo(() => {
     if (!todaysMeals.length) return null;
