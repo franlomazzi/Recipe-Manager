@@ -5,6 +5,7 @@ import { ActiveAccountProvider } from "@/lib/contexts/active-account-context";
 import { AuthProvider } from "@/lib/contexts/auth-context";
 import { HouseholdProvider } from "@/lib/contexts/household-context";
 import { CookingSessionProvider } from "@/lib/contexts/cooking-session-context";
+import { AppDataProvider } from "@/lib/contexts/app-data-context";
 import { Toaster } from "@/components/ui/sonner";
 import { useAutoTheme } from "@/lib/hooks/use-auto-theme";
 
@@ -26,10 +27,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <ActiveAccountProvider>
         <AuthProvider>
           <HouseholdProvider>
-            <CookingSessionProvider>
-              {children}
-              <Toaster />
-            </CookingSessionProvider>
+            <AppDataProvider>
+              <CookingSessionProvider>
+                {children}
+                <Toaster />
+              </CookingSessionProvider>
+            </AppDataProvider>
           </HouseholdProvider>
         </AuthProvider>
       </ActiveAccountProvider>

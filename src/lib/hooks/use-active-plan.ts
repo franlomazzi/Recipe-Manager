@@ -1,36 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useAuth } from "@/lib/contexts/auth-context";
-import {
-  subscribeToActiveInstance,
-  getIndicesForDate,
-} from "@/lib/firebase/meal-plans";
-import type { PlanInstance } from "@/lib/types/meal-plan";
+import { useAppData } from "@/lib/contexts/app-data-context";
 
 export function useActivePlan() {
-  const { user } = useAuth();
-  const [instance, setInstance] = useState<PlanInstance | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!user) {
-      setInstance(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const unsub = subscribeToActiveInstance(user.uid, (inst) => {
-      setInstance(inst);
-      setLoading(false);
-    });
-    return unsub;
-  }, [user]);
-
-  const todayIndices = useMemo(() => {
-    if (!instance) return null;
-    return getIndicesForDate(instance, new Date());
-  }, [instance]);
-
+  const { instance, planLoading: loading, todayIndices } = useAppData();
   return { instance, loading, todayIndices };
 }
