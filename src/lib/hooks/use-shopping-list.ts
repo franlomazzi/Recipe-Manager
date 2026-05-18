@@ -606,6 +606,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     individualPantryProcessed,
     exclusionsByWeek,
     exclusions,
+    closedWeeks: state?.closedWeeks ?? [],
     loading,
     hasActivePlan: !!planInstance,
     instance: planInstance ?? null,

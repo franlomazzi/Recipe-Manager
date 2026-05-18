@@ -5,6 +5,8 @@ import {
   onSnapshot,
   serverTimestamp,
   deleteField,
+  arrayUnion,
+  arrayRemove,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getDb } from "./config";
@@ -174,6 +176,14 @@ export async function migrateWeekKey(
 
 export async function clearAllChecked(userId: string) {
   await patchOrCreate(userId, { checkedKeys: [] });
+}
+
+export async function closeWeek(userId: string, weekKey: string): Promise<void> {
+  await patchOrCreate(userId, { closedWeeks: arrayUnion(weekKey) });
+}
+
+export async function reopenWeek(userId: string, weekKey: string): Promise<void> {
+  await patchOrCreate(userId, { closedWeeks: arrayRemove(weekKey) });
 }
 
 // ─── Individual pantry helpers ────────────────────────────────────────────────

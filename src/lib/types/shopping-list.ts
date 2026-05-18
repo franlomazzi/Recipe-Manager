@@ -91,6 +91,8 @@ export interface ShoppingListState {
   individualPantryProcessedByWeek?: Record<string, boolean>;
   /** Per-week item keys the user has explicitly removed from the shopping list */
   exclusionsByWeek?: Record<string, string[]>;
+  /** ISO week keys (e.g. "2026-W21") the user has marked as done after shopping */
+  closedWeeks?: string[];
   updatedAt?: Timestamp;
 }
 

@@ -15,6 +15,8 @@ import {
   clearAllChecked,
   setOneOffMeta,
   clearExtraRecipesForWeek,
+  closeWeek,
+  reopenWeek,
 } from "@/lib/firebase/shopping-list";
 import {
   updateLibraryIngredient,
@@ -92,6 +94,8 @@ import {
   RotateCcw,
   GripVertical,
   Wallet,
+  CheckCheck,
+  Lock,
 } from "lucide-react";
 import {
   DndContext,
@@ -181,6 +185,7 @@ export default function ShoppingListPage() {
   // arrives asynchronously — it's null on first render, so effectiveInstance
   // would point at the freestyle fallback and compute an incorrect offset.
   const seededFromInstance = useRef(false);
+  const autoAdvancedRef = useRef(false);
   const handleToggleRef = useRef<(key: string) => Promise<void>>(async () => {});
   const handleToggleCustomRef = useRef<(id: string) => Promise<void>>(async () => {});
   useEffect(() => {
@@ -230,12 +235,26 @@ export default function ShoppingListPage() {
     individualPantryCheckedIds,
     individualPantryProcessed,
     exclusionsByWeek,
+    closedWeeks,
     loading,
     hasActivePlan,
   } = useShoppingList(weekIndex, effectiveInstance);
 
   const { pantryItems } = usePantryItems(individualPantryItemIds);
   const { items: libraryItems } = useIngredientLibrary();
+
+  // Once the shopping list state has loaded, advance past any closed weeks automatically.
+  // This only runs once on initial load — if the user manually navigates to a closed week
+  // they can still view and reopen it.
+  useEffect(() => {
+    if (loading || autoAdvancedRef.current) return;
+    if (closedWeeks.includes(weekKey) && weekIndex < calendarWeekMeta.totalWeeks - 1) {
+      setWeekIndex((i) => i + 1);
+      // Don't mark as done yet — re-evaluate with the new weekKey next render
+    } else {
+      autoAdvancedRef.current = true;
+    }
+  }, [loading, closedWeeks, weekKey, weekIndex, calendarWeekMeta.totalWeeks]);
 
   // Surface a brief toast when the partner ticks a shared item off the list
   // (throttled so a fast scan at the supermarket doesn't spam notifications).
@@ -255,6 +274,7 @@ export default function ShoppingListPage() {
   const [commitPantryConfirmOpen, setCommitPantryConfirmOpen] = useState(false);
   const [undoHouseholdOpen, setUndoHouseholdOpen] = useState(false);
   const [undoIndividualOpen, setUndoIndividualOpen] = useState(false);
+  const [weekStatusConfirm, setWeekStatusConfirm] = useState<"close" | "reopen" | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   type ResetScope = "extraRecipes" | "pantryIndividual" | "pantryHousehold" | "everything";
   const [resetScope, setResetScope] = useState<ResetScope>("everything");
@@ -275,6 +295,8 @@ export default function ShoppingListPage() {
     const end = addDays(start, 6);
     return { start, end };
   }, [weekIndex, calendarWeekMeta]);
+
+  const isWeekClosed = closedWeeks.includes(weekKey);
 
   // Lookup map
   const locationMap = useMemo(
@@ -1059,6 +1081,7 @@ export default function ShoppingListPage() {
               size="sm"
               className="rounded-xl"
               onClick={handleClearChecked}
+              disabled={isWeekClosed}
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
               Clear checked
@@ -1073,8 +1096,8 @@ export default function ShoppingListPage() {
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
             Reset week
           </Button>
-          <Dialog open={addRecipeOpen} onOpenChange={setAddRecipeOpen}>
-            <DialogTrigger render={<Button size="sm" className="rounded-xl" />}>
+          <Dialog open={addRecipeOpen} onOpenChange={(v) => { if (!isWeekClosed) setAddRecipeOpen(v); }}>
+            <DialogTrigger render={<Button size="sm" className="rounded-xl" disabled={isWeekClosed} />}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               Add Recipe
             </DialogTrigger>
@@ -1141,20 +1164,49 @@ export default function ShoppingListPage() {
 
       {/* Week selector */}
       {weekRange && (
-        <Card className="pt-0">
+        <Card className={`pt-0 ${isWeekClosed ? "border-green-500/40 bg-green-500/5" : ""}`}>
           <CardContent className="flex items-center gap-3 px-3 py-2">
-            <CalendarDays className="h-4 w-4 text-primary shrink-0" />
+            <CalendarDays className={`h-4 w-4 shrink-0 ${isWeekClosed ? "text-green-600 dark:text-green-400" : "text-primary"}`} />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-muted-foreground">
                 {effectiveInstance.templateName} · Week {weekIndex + 1}/
                 {calendarWeekMeta.totalWeeks}
               </p>
-              <p className="text-sm font-semibold truncate">
-                {format(weekRange.start, "MMM d")} –{" "}
-                {format(weekRange.end, "MMM d")}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold truncate">
+                  {format(weekRange.start, "MMM d")} –{" "}
+                  {format(weekRange.end, "MMM d")}
+                </p>
+                {isWeekClosed && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400 shrink-0">
+                    <CheckCheck className="h-3 w-3" />
+                    Done
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
+              {isWeekClosed ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs text-muted-foreground"
+                  onClick={() => setWeekStatusConfirm("reopen")}
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  Reopen
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs text-green-700 dark:text-green-400 hover:text-green-700 dark:hover:text-green-400 hover:bg-green-500/10"
+                  onClick={() => setWeekStatusConfirm("close")}
+                >
+                  <CheckCheck className="h-3 w-3 mr-1" />
+                  Close list
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -1176,6 +1228,24 @@ export default function ShoppingListPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Read-only banner when week is closed */}
+      {isWeekClosed && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/60 border border-border text-xs text-muted-foreground">
+          <Lock className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            This list is read-only.{" "}
+            <button
+              type="button"
+              className="underline hover:text-foreground transition-colors"
+              onClick={() => setWeekStatusConfirm("reopen")}
+            >
+              Reopen
+            </button>{" "}
+            to make changes.
+          </span>
+        </div>
       )}
 
       {/* Sources summary */}
@@ -1263,29 +1333,31 @@ export default function ShoppingListPage() {
       )}
 
       {/* Add custom item */}
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleAddCustom();
-        }}
-      >
-        <Input
-          placeholder="Add a custom item..."
-          value={customInput}
-          onChange={(e) => setCustomInput(e.target.value)}
-          className="rounded-xl bg-card border-transparent card-elevated"
-        />
-        <Button
-          type="submit"
-          size="icon"
-          variant="outline"
-          className="rounded-xl shrink-0"
-          disabled={!customInput.trim()}
+      {!isWeekClosed && (
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleAddCustom();
+          }}
         >
-          <Plus className="h-4 w-4" />
-        </Button>
-      </form>
+          <Input
+            placeholder="Add a custom item..."
+            value={customInput}
+            onChange={(e) => setCustomInput(e.target.value)}
+            className="rounded-xl bg-card border-transparent card-elevated"
+          />
+          <Button
+            type="submit"
+            size="icon"
+            variant="outline"
+            className="rounded-xl shrink-0"
+            disabled={!customInput.trim()}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </form>
+      )}
 
       {/* Empty state */}
       {isEmpty && (
@@ -1314,18 +1386,24 @@ export default function ShoppingListPage() {
             <CardContent className="divide-y p-0">
               {activeCustomItems.map((item) => (
                 <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <Checkbox
-                    checked={item.checked}
-                    onCheckedChange={() => handleToggleCustom(item.id)}
-                  />
-                  <span className="flex-1 text-sm">{item.name}</span>
-                  <button
-                    type="button"
-                    className="text-muted-foreground/40 hover:text-destructive transition-colors"
-                    onClick={() => handleRemoveCustom(item.id)}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  {isWeekClosed ? (
+                    <Lock className="h-4 w-4 text-muted-foreground/30 shrink-0" />
+                  ) : (
+                    <Checkbox
+                      checked={item.checked}
+                      onCheckedChange={() => handleToggleCustom(item.id)}
+                    />
+                  )}
+                  <span className={`flex-1 text-sm ${isWeekClosed ? "text-muted-foreground/60" : ""}`}>{item.name}</span>
+                  {!isWeekClosed && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground/40 hover:text-destructive transition-colors"
+                      onClick={() => handleRemoveCustom(item.id)}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </CardContent>
@@ -1379,6 +1457,7 @@ export default function ShoppingListPage() {
                             ? sharedPantryCheckedProvenance.get(item.key) ?? null
                             : null
                         }
+                        locked={isWeekClosed}
                       />
                     ) : (
                       <ItemRow
@@ -1403,6 +1482,7 @@ export default function ShoppingListPage() {
                             ? sharedPantryCheckedProvenance.get(item.key) ?? null
                             : null
                         }
+                        locked={isWeekClosed}
                       />
                     )
                   );
@@ -1466,6 +1546,7 @@ export default function ShoppingListPage() {
                           ? sharedPantryCheckedProvenance.get(item.key) ?? null
                           : null
                       }
+                      locked={isWeekClosed}
                     />
                   ))}
                 </div>
@@ -1507,10 +1588,14 @@ export default function ShoppingListPage() {
                       key={item.key}
                       className="flex items-center gap-3 px-4 py-2.5 opacity-70"
                     >
-                      <Checkbox
-                        checked
-                        onCheckedChange={() => handleToggle(item.key)}
-                      />
+                      {isWeekClosed && !(item.fromPantry && item.pantryShared) ? (
+                        <Lock className="h-4 w-4 text-muted-foreground/30 shrink-0" />
+                      ) : (
+                        <Checkbox
+                          checked
+                          onCheckedChange={() => handleToggle(item.key)}
+                        />
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-baseline gap-2">
                           <span className="text-sm font-medium line-through text-muted-foreground">
@@ -1542,20 +1627,26 @@ export default function ShoppingListPage() {
                     key={item.id}
                     className="flex items-center gap-3 px-4 py-2.5 opacity-70"
                   >
-                    <Checkbox
-                      checked
-                      onCheckedChange={() => handleToggleCustom(item.id)}
-                    />
+                    {isWeekClosed ? (
+                      <Lock className="h-4 w-4 text-muted-foreground/30 shrink-0" />
+                    ) : (
+                      <Checkbox
+                        checked
+                        onCheckedChange={() => handleToggleCustom(item.id)}
+                      />
+                    )}
                     <span className="flex-1 text-sm line-through text-muted-foreground">
                       {item.name}
                     </span>
-                    <button
-                      type="button"
-                      className="text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onClick={() => handleRemoveCustom(item.id)}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
+                    {!isWeekClosed && (
+                      <button
+                        type="button"
+                        className="text-muted-foreground/40 hover:text-destructive transition-colors"
+                        onClick={() => handleRemoveCustom(item.id)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </CardContent>
@@ -1694,6 +1785,7 @@ export default function ShoppingListPage() {
                                 skipStamp={null}
                                 household={null}
                                 onToggle={() => handleTogglePantry(p.id, p.scope)}
+                                locked={isWeekClosed}
                               />
                             );
                           })}
@@ -1704,6 +1796,7 @@ export default function ShoppingListPage() {
                             variant="outline"
                             className="rounded-xl"
                             onClick={() => void handleCommitIndividualPantry()}
+                            disabled={isWeekClosed}
                           >
                             <Plus className="mr-1.5 h-3.5 w-3.5" />
                             Add my items
@@ -1745,6 +1838,7 @@ export default function ShoppingListPage() {
                         skipStamp={null}
                         household={null}
                         onToggle={() => handleTogglePantry(p.id, p.scope)}
+                        locked={isWeekClosed}
                       />
                     );
                   })}
@@ -1754,6 +1848,7 @@ export default function ShoppingListPage() {
                     size="sm"
                     className="rounded-xl"
                     onClick={() => void handleCommitIndividualPantry()}
+                    disabled={isWeekClosed}
                   >
                     <Plus className="mr-1.5 h-3.5 w-3.5" />
                     Add to shopping list
@@ -1862,6 +1957,43 @@ export default function ShoppingListPage() {
             </DialogClose>
             <Button variant="destructive" onClick={() => void handleReset()}>
               Reset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm close / reopen week */}
+      <Dialog open={weekStatusConfirm !== null} onOpenChange={(open) => { if (!open) setWeekStatusConfirm(null); }}>
+        <DialogContent showCloseButton={false} className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {weekStatusConfirm === "close" ? "Close this week's list?" : "Reopen this week's list?"}
+            </DialogTitle>
+            <DialogDescription>
+              {weekStatusConfirm === "close"
+                ? "Mark the shopping list as done for this week. The app will default to the next week's list."
+                : "Reopen this week's shopping list. It will no longer be marked as done."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              onClick={() => {
+                if (!user) return;
+                if (weekStatusConfirm === "close") {
+                  closeWeek(user.uid, weekKey);
+                  if (weekIndex < calendarWeekMeta.totalWeeks - 1) {
+                    setWeekIndex((i) => i + 1);
+                  }
+                } else {
+                  reopenWeek(user.uid, weekKey);
+                }
+                setWeekStatusConfirm(null);
+              }}
+            >
+              {weekStatusConfirm === "close" ? "Close list" : "Reopen"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2096,6 +2228,7 @@ function SortableItemRow({
   household,
   addedStamp,
   tickedStamp,
+  locked,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
@@ -2105,6 +2238,7 @@ function SortableItemRow({
   household?: Household | null;
   addedStamp?: ProvenanceStamp | null;
   tickedStamp?: ProvenanceStamp | null;
+  locked?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.key });
@@ -2126,6 +2260,7 @@ function SortableItemRow({
         addedStamp={addedStamp}
         tickedStamp={tickedStamp}
         dragHandleProps={{ ...attributes, ...listeners }}
+        locked={locked}
       />
     </div>
   );
@@ -2141,6 +2276,7 @@ function ItemRow({
   household,
   addedStamp,
   tickedStamp,
+  locked,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
@@ -2151,6 +2287,7 @@ function ItemRow({
   household?: Household | null;
   addedStamp?: ProvenanceStamp | null;
   tickedStamp?: ProvenanceStamp | null;
+  locked?: boolean;
 }) {
   const isRemoved = !!item.removedStamp;
   // Decide which avatar (if any) to show on the right edge of the row.
@@ -2185,11 +2322,15 @@ function ItemRow({
           <GripVertical className="h-4 w-4" />
         </button>
       )}
-      <Checkbox
-        checked={item.checked}
-        onCheckedChange={onToggle}
-        disabled={isRemoved}
-      />
+      {locked && !item.pantryShared ? (
+        <Lock className="h-4 w-4 text-muted-foreground/30 shrink-0" />
+      ) : (
+        <Checkbox
+          checked={item.checked}
+          onCheckedChange={onToggle}
+          disabled={isRemoved}
+        />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
           <span
@@ -2198,6 +2339,8 @@ function ItemRow({
                 ? "line-through text-muted-foreground/50"
                 : item.checked
                 ? "line-through text-muted-foreground/60"
+                : locked && !item.pantryShared
+                ? "text-muted-foreground/60"
                 : ""
             }`}
           >
@@ -2995,18 +3138,24 @@ function PantryCheckRow({
   skipStamp,
   household,
   onToggle,
+  locked,
 }: {
   item: import("@/lib/hooks/use-pantry-items").PantryItem;
   skip: boolean;
   skipStamp: ProvenanceStamp | null;
   household: Household | null;
   onToggle: () => void;
+  locked?: boolean;
 }) {
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
-      <Checkbox checked={skip} onCheckedChange={onToggle} />
+      {locked ? (
+        <Lock className="h-4 w-4 text-muted-foreground/30 shrink-0" />
+      ) : (
+        <Checkbox checked={skip} onCheckedChange={onToggle} />
+      )}
       <div className="flex-1 min-w-0">
-        <span className={`text-sm ${skip ? "line-through text-muted-foreground/60" : ""}`}>
+        <span className={`text-sm ${skip ? "line-through text-muted-foreground/60" : locked ? "text-muted-foreground/60" : ""}`}>
           {item.name}
         </span>
       </div>

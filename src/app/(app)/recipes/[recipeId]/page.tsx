@@ -151,6 +151,14 @@ export default function RecipeDetailPage() {
     setShoppingWeekIndex(Math.max(0, Math.min(totalWeeks - 1, offset)));
   }, [calendarWeekMeta]);
 
+  // Reset closed-week confirmation when dialog closes or week changes
+  useEffect(() => {
+    if (!showShoppingDialog) setClosedWeekConfirm(false);
+  }, [showShoppingDialog]);
+  useEffect(() => {
+    setClosedWeekConfirm(false);
+  }, [shoppingWeekIndex]);
+
   const shoppingWeekRange = useMemo(() => {
     const start = addDays(calendarWeekMeta.firstMonday, shoppingWeekIndex * 7);
     const end = addDays(start, 6);
@@ -161,6 +169,15 @@ export default function RecipeDetailPage() {
     () => shoppingListState?.extraByWeek ?? {},
     [shoppingListState]
   );
+
+  const closedWeeks = shoppingListState?.closedWeeks ?? [];
+
+  const selectedWeekKey = useMemo(
+    () => isoWeekKey(addDays(calendarWeekMeta.firstMonday, shoppingWeekIndex * 7)),
+    [calendarWeekMeta, shoppingWeekIndex]
+  );
+
+  const [closedWeekConfirm, setClosedWeekConfirm] = useState(false);
 
   const libraryMap = useMemo(
     () => new Map(libraryItems.map((li) => [li.id, li])),
@@ -248,6 +265,11 @@ export default function RecipeDetailPage() {
         totalShoppingWeeks={calendarWeekMeta.totalWeeks}
         addingToShopping={addingToShopping}
         handleAddToShoppingList={handleAddToShoppingList}
+        closedWeekConfirm={closedWeekConfirm}
+        onAddToWeekAnyway={() => void doAddToShoppingList(shoppingWeekIndex)}
+        onAddToNextWeek={() => void doAddToShoppingList(shoppingWeekIndex + 1)}
+        onClosedWeekGoBack={() => setClosedWeekConfirm(false)}
+        totalShoppingWeeksForNext={calendarWeekMeta.totalWeeks}
         router={router}
         recipeCost={recipeCost}
       />
@@ -322,10 +344,10 @@ export default function RecipeDetailPage() {
     }
   }
 
-  async function handleAddToShoppingList() {
+  async function doAddToShoppingList(weekIdx: number) {
     if (!user || !recipe) return;
     setAddingToShopping(true);
-    const weekKey = isoWeekKey(addDays(calendarWeekMeta.firstMonday, shoppingWeekIndex * 7));
+    const weekKey = isoWeekKey(addDays(calendarWeekMeta.firstMonday, weekIdx * 7));
     try {
       await addRecipeToWeek(user.uid, weekKey, {
         recipeId: recipe.id,
@@ -333,11 +355,20 @@ export default function RecipeDetailPage() {
       }, extraByWeek);
       toast.success("Added to shopping list");
       setShowShoppingDialog(false);
+      setClosedWeekConfirm(false);
     } catch {
       toast.error("Failed to add to shopping list");
     } finally {
       setAddingToShopping(false);
     }
+  }
+
+  async function handleAddToShoppingList() {
+    if (closedWeeks.includes(selectedWeekKey)) {
+      setClosedWeekConfirm(true);
+      return;
+    }
+    await doAddToShoppingList(shoppingWeekIndex);
   }
 
   function renderStars(rating: number) {
@@ -610,23 +641,55 @@ export default function RecipeDetailPage() {
               </div>
             </div>
 
-            <div className="flex gap-2 px-6 pb-6 pt-1">
-              <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setShowShoppingDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                className="flex-1 rounded-xl"
-                onClick={handleAddToShoppingList}
-                disabled={addingToShopping}
-              >
-                {addingToShopping ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <ShoppingCart className="mr-2 h-4 w-4" />
-                )}
-                Add ingredients
-              </Button>
-            </div>
+            {closedWeekConfirm ? (
+              <div className="px-6 pb-6 pt-1 space-y-3">
+                <p className="text-sm text-amber-700 dark:text-amber-400 font-medium">
+                  This week is closed. What would you like to do?
+                </p>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="outline"
+                    className="w-full rounded-xl"
+                    onClick={() => void doAddToShoppingList(shoppingWeekIndex)}
+                    disabled={addingToShopping}
+                  >
+                    {addingToShopping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Add to this week anyway
+                  </Button>
+                  {shoppingWeekIndex < calendarWeekMeta.totalWeeks - 1 && (
+                    <Button
+                      className="w-full rounded-xl"
+                      onClick={() => void doAddToShoppingList(shoppingWeekIndex + 1)}
+                      disabled={addingToShopping}
+                    >
+                      {addingToShopping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShoppingCart className="mr-2 h-4 w-4" />}
+                      Add to next week instead
+                    </Button>
+                  )}
+                  <Button variant="ghost" className="w-full rounded-xl" onClick={() => setClosedWeekConfirm(false)}>
+                    Go back
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2 px-6 pb-6 pt-1">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setShowShoppingDialog(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1 rounded-xl"
+                  onClick={handleAddToShoppingList}
+                  disabled={addingToShopping}
+                >
+                  {addingToShopping ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShoppingCart className="mr-2 h-4 w-4" />
+                  )}
+                  Add ingredients
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1159,6 +1222,11 @@ type KTDetailProps = {
   totalShoppingWeeks: number;
   addingToShopping: boolean;
   handleAddToShoppingList: () => void | Promise<void>;
+  closedWeekConfirm: boolean;
+  onAddToWeekAnyway: () => void | Promise<void>;
+  onAddToNextWeek: () => void | Promise<void>;
+  onClosedWeekGoBack: () => void;
+  totalShoppingWeeksForNext: number;
   router: ReturnType<typeof useRouter>;
   recipeCost: { total: number; priced: number; unpriced: number };
 };
@@ -1170,7 +1238,10 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
     cookLogs, showCookDialog, setShowCookDialog, cookServings, setCookServings,
     showShoppingDialog, setShowShoppingDialog, activePlan,
     shoppingWeekIndex, setShoppingWeekIndex, shoppingWeekRange, totalShoppingWeeks,
-    addingToShopping, handleAddToShoppingList, router, recipeCost,
+    addingToShopping, handleAddToShoppingList,
+    closedWeekConfirm, onAddToWeekAnyway, onAddToNextWeek, onClosedWeekGoBack,
+    totalShoppingWeeksForNext,
+    router, recipeCost,
   } = props;
 
   const adjustedServings = recipe.servings * servingMultiplier;
@@ -1482,13 +1553,34 @@ function KitchenToolRecipeDetail(props: KTDetailProps) {
                 </Button>
               </div>
             </div>
-            <div className="flex gap-2 px-6 pb-6 pt-1">
-              <Button variant="outline" className="flex-1" onClick={() => setShowShoppingDialog(false)}>Cancel</Button>
-              <Button className="flex-1" onClick={handleAddToShoppingList} disabled={addingToShopping}>
-                {addingToShopping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShoppingCart className="mr-2 h-4 w-4" />}
-                Add ingredients
-              </Button>
-            </div>
+            {closedWeekConfirm ? (
+              <div className="px-6 pb-6 pt-1 space-y-3">
+                <p className="text-sm text-amber-700 dark:text-amber-400 font-medium">
+                  This week is closed. What would you like to do?
+                </p>
+                <div className="flex flex-col gap-2">
+                  <Button variant="outline" className="w-full" onClick={() => void onAddToWeekAnyway()} disabled={addingToShopping}>
+                    {addingToShopping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Add to this week anyway
+                  </Button>
+                  {shoppingWeekIndex < totalShoppingWeeksForNext - 1 && (
+                    <Button className="w-full" onClick={() => void onAddToNextWeek()} disabled={addingToShopping}>
+                      {addingToShopping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShoppingCart className="mr-2 h-4 w-4" />}
+                      Add to next week instead
+                    </Button>
+                  )}
+                  <Button variant="ghost" className="w-full" onClick={onClosedWeekGoBack}>Go back</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2 px-6 pb-6 pt-1">
+                <Button variant="outline" className="flex-1" onClick={() => setShowShoppingDialog(false)}>Cancel</Button>
+                <Button className="flex-1" onClick={handleAddToShoppingList} disabled={addingToShopping}>
+                  {addingToShopping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShoppingCart className="mr-2 h-4 w-4" />}
+                  Add ingredients
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}
