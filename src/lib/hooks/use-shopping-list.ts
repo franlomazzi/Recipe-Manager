@@ -42,7 +42,8 @@ function itemKey(name: string): string {
  */
 function recipeOccurrencesForCalendarWeek(
   instance: PlanInstance,
-  weekOffset: number
+  weekOffset: number,
+  recipeServings: Map<string, number>
 ): Map<string, number> {
   const counts = new Map<string, number>();
   const planStart = parseISO(instance.startDate);
@@ -54,7 +55,16 @@ function recipeOccurrencesForCalendarWeek(
     const day = instance.snapshot[indices.weekIndex]?.days[indices.dayIndex];
     if (!day) continue;
     for (const meal of day.meals) {
-      counts.set(meal.mealId, (counts.get(meal.mealId) ?? 0) + 1);
+      // A meal with a chosen serving amount contributes that amount relative to
+      // the recipe default (servingAmount / recipe.servings). When no serving
+      // amount is set it counts as one whole recipe. The serving amount is
+      // chosen when the meal is added to the plan, and defaults to the recipe's
+      // own servings — so the default contributes exactly one full recipe.
+      const weight =
+        meal.servingAmount != null
+          ? meal.servingAmount / (recipeServings.get(meal.mealId) || 1)
+          : 1;
+      counts.set(meal.mealId, (counts.get(meal.mealId) ?? 0) + weight);
     }
   }
   return counts;
@@ -293,8 +303,10 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
       removedStamp,
       sources: Array.from(val.sources.entries()).map(([id, info]) => ({
         recipeId: id,
+        // Only show a "×N" multiplier for whole repeats; fractional servings
+        // weights (e.g. 1.5) would read oddly, so just show the recipe name.
         recipeName:
-          info.totalCount > 1
+          Number.isInteger(info.totalCount) && info.totalCount > 1
             ? `${info.name} ×${info.totalCount}`
             : info.name,
       })),
@@ -343,12 +355,17 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     [libraryItems]
   );
 
+  const recipeServings = useMemo(
+    () => new Map(recipes.map((r) => [r.id, r.servings || 1])),
+    [recipes]
+  );
+
   const planOccurrences = useMemo(
     () =>
       instance
-        ? recipeOccurrencesForCalendarWeek(instance, weekIndex)
+        ? recipeOccurrencesForCalendarWeek(instance, weekIndex, recipeServings)
         : new Map<string, number>(),
-    [instance, weekIndex]
+    [instance, weekIndex, recipeServings]
   );
 
   const extraByWeek = useMemo(() => state?.extraByWeek ?? {}, [state]);

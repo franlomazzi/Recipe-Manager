@@ -5,12 +5,16 @@ import { useAuth } from "@/lib/contexts/auth-context";
 import {
   subscribeMealPlanPrefs,
   setForceShowCategory,
+  setMultiRecipePerMeal,
   type MealPlanPrefs,
 } from "@/lib/firebase/meal-plan-prefs";
 
 export function useMealPlanPrefs() {
   const { user } = useAuth();
-  const [prefs, setPrefs] = useState<MealPlanPrefs>({ forceShowCategories: [] });
+  const [prefs, setPrefs] = useState<MealPlanPrefs>({
+    forceShowCategories: [],
+    multiRecipePerMeal: false,
+  });
 
   useEffect(() => {
     if (!user) return;
@@ -25,7 +29,21 @@ export function useMealPlanPrefs() {
     [user]
   );
 
-  const forceShow = new Set(prefs.forceShowCategories);
+  const toggleMultiRecipePerMeal = useCallback(
+    (on: boolean) => {
+      if (!user) return;
+      setMultiRecipePerMeal(user.uid, on);
+    },
+    [user]
+  );
 
-  return { forceShow, toggleForceShow };
+  const forceShow = new Set(prefs.forceShowCategories);
+  const multiRecipePerMeal = !!prefs.multiRecipePerMeal;
+
+  return {
+    forceShow,
+    toggleForceShow,
+    multiRecipePerMeal,
+    toggleMultiRecipePerMeal,
+  };
 }

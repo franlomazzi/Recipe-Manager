@@ -27,6 +27,7 @@ import {
   BookOpen,
   ArrowLeftRight,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 import { MealPickerDialog } from "./meal-picker-dialog";
 import {
@@ -46,6 +47,12 @@ import {
 import type { PlanInstance, PlanMeal, PlanDay } from "@/lib/types/meal-plan";
 import { MEAL_CATEGORIES, DAYS_OF_WEEK } from "@/lib/types/meal-plan";
 import { useMealPlanPrefs } from "@/lib/hooks/use-meal-plan-prefs";
+import { macrosForServingAmount } from "@/lib/utils/plan-macros";
+import { useMealCombo } from "@/lib/hooks/use-meal-combo";
+import { useCookingSession } from "@/lib/contexts/cooking-session-context";
+import { useAuth } from "@/lib/contexts/auth-context";
+import { getCookLogs } from "@/lib/firebase/firestore";
+import { fetchScaledInstructions } from "@/lib/cooking/fetch-scaled-instructions";
 
 interface WeeklyViewProps {
   instance: PlanInstance;
@@ -73,6 +80,9 @@ export function WeeklyView({
   const isAdhoc = instance.status === "adhoc";
   const router = useRouter();
   const { recipes } = useRecipes();
+  const { user } = useAuth();
+  const { addSession, setActiveSession, setScaledInstructions } =
+    useCookingSession();
 
   const planStart = parseISO(instance.startDate);
   const planEnd = addDays(planStart, instance.snapshot.length * 7 - 1);
@@ -99,19 +109,44 @@ export function WeeklyView({
     return 0;
   });
 
-  // Meal picker state — colIdx is the 0..6 column in the displayed Mon-Sun week
+  // Meal picker state — colIdx is the 0..6 column in the displayed Mon-Sun week.
+  // In multi-recipe mode, `mode` and `mealIndex` target a specific component:
+  //   mode "add"     → append a new component to the category
+  //   mode "replace" → swap the component at `mealIndex` (or the whole category
+  //                    slot in single-recipe mode when mealIndex is undefined)
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<{
     colIdx: number;
     category: string;
+    mode: "replace" | "add";
+    mealIndex?: number;
   } | null>(null);
 
-  // Meal action sheet state
+  // Meal action sheet state — `mealIndex` targets a specific component in
+  // multi-recipe mode; undefined means "the single meal in this category".
   const [actionOpen, setActionOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<{
     colIdx: number;
     category: string;
+    mealIndex?: number;
   } | null>(null);
+
+  // Expand sheet — opened from a unified multi-recipe card to reveal its
+  // individual components for cooking / editing.
+  const [expandOpen, setExpandOpen] = useState(false);
+  const [expandTarget, setExpandTarget] = useState<{
+    colIdx: number;
+    category: string;
+  } | null>(null);
+
+  // "Cook all" — confirm servings for every recipe in a multi-recipe meal,
+  // then start them together as parallel tabs in one cooking session.
+  const [cookAllOpen, setCookAllOpen] = useState(false);
+  // Servings keyed by mealId (duplicate recipes collapse to one cooking tab).
+  const [cookAllServings, setCookAllServings] = useState<Record<string, number>>(
+    {}
+  );
+  const [startingCookAll, setStartingCookAll] = useState(false);
 
   // Preload all meal photos across the entire plan so navigating between weeks
   // and returning to this page uses the browser cache instead of re-fetching.
@@ -147,7 +182,7 @@ export function WeeklyView({
     [recipes]
   );
 
-  const { forceShow } = useMealPlanPrefs();
+  const { forceShow, multiRecipePerMeal } = useMealPlanPrefs();
 
   const currentWeekCategories = useMemo(() => {
     const s = new Set<string>();
@@ -172,6 +207,11 @@ export function WeeklyView({
     [recipes]
   );
 
+  const recipesById = useMemo(
+    () => new Map(recipes.map((r) => [r.id, r])),
+    [recipes]
+  );
+
   // Servings dialog state
   const [cookTarget, setCookTarget] = useState<{ mealId: string; defaultServings: number } | null>(null);
   const [cookServings, setCookServings] = useState(1);
@@ -184,60 +224,219 @@ export function WeeklyView({
     );
   }
 
-  function openPicker(colIdx: number, category: string) {
+  // ── Day / component helpers (used in multi-recipe mode) ──
+
+  function getDay(
+    colIdx: number
+  ): { weekIndex: number; dayIndex: number; day: PlanDay } | null {
+    const indices = indicesForColumn(colIdx);
+    if (!indices) return null;
+    const day = instance.snapshot[indices.weekIndex]?.days[indices.dayIndex];
+    if (!day) return null;
+    return { ...indices, day };
+  }
+
+  /** Components in a category, each paired with its absolute index in day.meals. */
+  function getCategoryMeals(
+    colIdx: number,
+    category: string
+  ): { meal: PlanMeal; index: number }[] {
+    const ctx = getDay(colIdx);
+    if (!ctx) return [];
+    return ctx.day.meals
+      .map((meal, index) => ({ meal, index }))
+      .filter((x) => x.meal.category === category);
+  }
+
+  async function commitDayMeals(colIdx: number, meals: PlanMeal[]) {
+    const ctx = getDay(colIdx);
+    if (!ctx) return;
+    const updatedDay: PlanDay = { meals };
+    if (onUpdateDay) {
+      await onUpdateDay(ctx.weekIndex, ctx.dayIndex, updatedDay);
+    } else {
+      await updateInstanceDay(instance.id, ctx.weekIndex, ctx.dayIndex, updatedDay);
+    }
+  }
+
+  function openPicker(
+    colIdx: number,
+    category: string,
+    opts?: { mode?: "replace" | "add"; mealIndex?: number }
+  ) {
     if (!indicesForColumn(colIdx)) return;
-    setPickerTarget({ colIdx, category });
+    setPickerTarget({
+      colIdx,
+      category,
+      mode: opts?.mode ?? "replace",
+      mealIndex: opts?.mealIndex,
+    });
     setPickerOpen(true);
   }
 
-  function openAction(colIdx: number, category: string) {
+  function openAction(colIdx: number, category: string, mealIndex?: number) {
     if (!indicesForColumn(colIdx)) return;
-    setActionTarget({ colIdx, category });
+    setActionTarget({ colIdx, category, mealIndex });
     setActionOpen(true);
+  }
+
+  function openExpand(colIdx: number, category: string) {
+    if (!indicesForColumn(colIdx)) return;
+    setExpandTarget({ colIdx, category });
+    setExpandOpen(true);
   }
 
   async function handleMealSelect(meal: PlanMeal) {
     if (!pickerTarget) return;
-    const indices = indicesForColumn(pickerTarget.colIdx);
-    if (!indices) return;
-    const { weekIndex, dayIndex } = indices;
-    const day = instance.snapshot[weekIndex]?.days[dayIndex];
-    if (!day) return;
-    const updatedDay: PlanDay = {
-      meals: [...day.meals.filter((m) => m.category !== pickerTarget.category), meal],
-    };
-    if (onUpdateDay) {
-      await onUpdateDay(weekIndex, dayIndex, updatedDay);
+    const { colIdx, category, mode, mealIndex } = pickerTarget;
+    const ctx = getDay(colIdx);
+    if (!ctx) return;
+
+    // The picker already attached the chosen `servingAmount` and scaled macros.
+    // Single-recipe mode: keep the one-meal-per-category swap behaviour.
+    if (!multiRecipePerMeal) {
+      await commitDayMeals(colIdx, [
+        ...ctx.day.meals.filter((m) => m.category !== category),
+        meal,
+      ]);
+      return;
+    }
+
+    // Multi-recipe mode: append, or replace the targeted component.
+    if (mode === "add" || mealIndex == null) {
+      await commitDayMeals(colIdx, [...ctx.day.meals, meal]);
     } else {
-      await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
+      await commitDayMeals(
+        colIdx,
+        ctx.day.meals.map((m, i) => (i === mealIndex ? meal : m))
+      );
     }
   }
 
   async function removeMeal(colIdx: number, category: string) {
-    const indices = indicesForColumn(colIdx);
-    if (!indices) return;
-    const { weekIndex, dayIndex } = indices;
-    const day = instance.snapshot[weekIndex]?.days[dayIndex];
-    if (!day) return;
-    const updatedDay: PlanDay = {
-      meals: day.meals.filter((m) => m.category !== category),
-    };
-    if (onUpdateDay) {
-      await onUpdateDay(weekIndex, dayIndex, updatedDay);
-    } else {
-      await updateInstanceDay(instance.id, weekIndex, dayIndex, updatedDay);
-    }
+    const ctx = getDay(colIdx);
+    if (!ctx) return;
+    await commitDayMeals(
+      colIdx,
+      ctx.day.meals.filter((m) => m.category !== category)
+    );
   }
 
-  function launchCook(mealId: string) {
+  async function removeMealAt(colIdx: number, mealIndex: number) {
+    const ctx = getDay(colIdx);
+    if (!ctx) return;
+    await commitDayMeals(
+      colIdx,
+      ctx.day.meals.filter((_, i) => i !== mealIndex)
+    );
+  }
+
+  async function setServingsAt(
+    colIdx: number,
+    mealIndex: number,
+    servingAmount: number
+  ) {
+    const ctx = getDay(colIdx);
+    if (!ctx) return;
+    await commitDayMeals(
+      colIdx,
+      ctx.day.meals.map((m, i) => {
+        if (i !== mealIndex) return m;
+        // Keep stored macros consistent with the chosen serving amount so the
+        // food tracking app reads correct values for this meal.
+        const recipe = recipesById.get(m.mealId);
+        return {
+          ...m,
+          servingAmount,
+          ...(recipe
+            ? { macros: macrosForServingAmount(recipe, servingAmount) }
+            : {}),
+        };
+      })
+    );
+  }
+
+  function launchCook(mealId: string, servingsOverride?: number) {
     const defaultServings = recipeServings.get(mealId) ?? 1;
-    setCookServings(defaultServings);
+    setCookServings(servingsOverride ?? defaultServings);
     setCookTarget({ mealId, defaultServings });
   }
 
-  const currentMealId = pickerTarget
-    ? getMeal(pickerTarget.colIdx, pickerTarget.category)?.mealId
-    : undefined;
+  // Open the "cook all" confirm dialog seeded with each cookable recipe's
+  // planned serving amount (duplicate recipes collapse to one entry).
+  function openCookAll(colIdx: number, category: string) {
+    const servings: Record<string, number> = {};
+    for (const { meal } of getCategoryMeals(colIdx, category)) {
+      if (!cookableIds.has(meal.mealId)) continue;
+      if (servings[meal.mealId] == null) {
+        servings[meal.mealId] =
+          meal.servingAmount ?? recipesById.get(meal.mealId)?.servings ?? 1;
+      }
+    }
+    setCookAllServings(servings);
+    setCookAllOpen(true);
+  }
+
+  // Start every recipe in the meal as parallel tabs in one cooking session.
+  async function handleStartCookAll() {
+    const entries = Object.entries(cookAllServings);
+    if (entries.length === 0) return;
+    setStartingCookAll(true);
+    try {
+      await Promise.all(
+        entries.map(async ([mealId, servings]) => {
+          const recipe = recipesById.get(mealId);
+          if (!recipe) return;
+          const multiplier = servings / (recipe.servings || 1);
+          const cookLogs = await getCookLogs(recipe.id).catch(() => []);
+          addSession(recipe, cookLogs, multiplier);
+          if (multiplier !== 1 && recipe.steps.length > 0) {
+            fetchScaledInstructions(
+              recipe.steps,
+              multiplier,
+              user,
+              recipe.id,
+              setScaledInstructions
+            );
+          }
+        })
+      );
+      setActiveSession(entries[0][0]);
+      router.push("/cook");
+    } finally {
+      setStartingCookAll(false);
+      setCookAllOpen(false);
+      setExpandOpen(false);
+    }
+  }
+
+  /** Resolve the meal a sheet/picker targets — by index (multi) or category. */
+  function getActionMeal(): PlanMeal | undefined {
+    if (!actionTarget) return undefined;
+    if (actionTarget.mealIndex != null) {
+      return getDay(actionTarget.colIdx)?.day.meals[actionTarget.mealIndex];
+    }
+    return getMeal(actionTarget.colIdx, actionTarget.category);
+  }
+
+  /** Absolute index in day.meals of the action target (single or multi). */
+  function getActionMealIndex(): number | null {
+    if (!actionTarget) return null;
+    if (actionTarget.mealIndex != null) return actionTarget.mealIndex;
+    const ctx = getDay(actionTarget.colIdx);
+    if (!ctx) return null;
+    const idx = ctx.day.meals.findIndex(
+      (m) => m.category === actionTarget.category
+    );
+    return idx >= 0 ? idx : null;
+  }
+
+  const currentMealId =
+    pickerTarget && pickerTarget.mode !== "add"
+      ? pickerTarget.mealIndex != null
+        ? getDay(pickerTarget.colIdx)?.day.meals[pickerTarget.mealIndex]?.mealId
+        : getMeal(pickerTarget.colIdx, pickerTarget.category)?.mealId
+      : undefined;
 
   return (
     <>
@@ -374,6 +573,37 @@ export function WeeklyView({
               </div>
             ) : (
               visibleCategories.map((category) => {
+                if (multiRecipePerMeal) {
+                  const components = getCategoryMeals(selectedDay, category);
+                  if (components.length >= 2) {
+                    return (
+                      <MobileUnifiedMealCard
+                        key={category}
+                        category={category}
+                        components={components}
+                        onOpen={() => openExpand(selectedDay, category)}
+                      />
+                    );
+                  }
+                  // 0 or 1 recipe → full card; tapping the recipe opens the
+                  // expand sheet where another can be added.
+                  const only = components[0];
+                  return (
+                    <MobileMealCard
+                      key={category}
+                      category={category}
+                      meal={only?.meal}
+                      cookable={only ? cookableIds.has(only.meal.mealId) : false}
+                      onTap={() =>
+                        openPicker(selectedDay, category, { mode: "add" })
+                      }
+                      onMealTap={() => openExpand(selectedDay, category)}
+                      onCook={() =>
+                        only && launchCook(only.meal.mealId, only.meal.servingAmount)
+                      }
+                    />
+                  );
+                }
                 const meal = getMeal(selectedDay, category);
                 const cookable = meal ? cookableIds.has(meal.mealId) : false;
                 return (
@@ -446,9 +676,39 @@ export function WeeklyView({
 
               {/* 7 day cells */}
               {DAYS_OF_WEEK.map((_, dayIdx) => {
+                const inRange = indicesForColumn(dayIdx) !== null;
+                if (multiRecipePerMeal) {
+                  const components = getCategoryMeals(dayIdx, category);
+                  // ≥2 components → one unified AI plate; tap to expand.
+                  if (inRange && components.length >= 2) {
+                    return (
+                      <UnifiedGridCell
+                        key={dayIdx}
+                        components={components}
+                        category={category}
+                        onOpen={() => openExpand(dayIdx, category)}
+                      />
+                    );
+                  }
+                  // 0 or 1 recipe → use the full cell. Tapping the single recipe
+                  // opens the expand sheet, where another can be added.
+                  const only = components[0];
+                  return (
+                    <GridCell
+                      key={dayIdx}
+                      meal={only?.meal}
+                      cookable={only ? cookableIds.has(only.meal.mealId) : false}
+                      inRange={inRange}
+                      onTap={() => openPicker(dayIdx, category, { mode: "add" })}
+                      onMealTap={() => openExpand(dayIdx, category)}
+                      onCook={() =>
+                        only && launchCook(only.meal.mealId, only.meal.servingAmount)
+                      }
+                    />
+                  );
+                }
                 const meal = getMeal(dayIdx, category);
                 const cookable = meal ? cookableIds.has(meal.mealId) : false;
-                const inRange = indicesForColumn(dayIdx) !== null;
                 return (
                   <GridCell
                     key={dayIdx}
@@ -469,22 +729,20 @@ export function WeeklyView({
       {/* Meal action sheet */}
       <Dialog open={actionOpen} onOpenChange={setActionOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="truncate">
-              {actionTarget
-                ? (getMeal(actionTarget.colIdx, actionTarget.category)?.mealName ?? "Meal options")
-                : "Meal options"}
+          <DialogHeader className="min-w-0">
+            <DialogTitle className="line-clamp-2 pr-8 leading-snug">
+              {getActionMeal()?.mealName ?? "Meal options"}
             </DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-2 pt-1">
-            {actionTarget && (() => {
-              const meal = getMeal(actionTarget.colIdx, actionTarget.category);
+            {(() => {
+              const meal = getActionMeal();
               return meal ? (
                 <Button
                   className="w-full justify-start gap-3 h-12"
                   onClick={() => {
                     setActionOpen(false);
-                    launchCook(meal.mealId);
+                    launchCook(meal.mealId, meal.servingAmount);
                   }}
                 >
                   <Play className="h-5 w-5" />
@@ -492,13 +750,57 @@ export function WeeklyView({
                 </Button>
               ) : null;
             })()}
+
+            {/* Servings stepper — adjust how much of this meal to plate up
+                (scales ingredients & shopping). Available in both modes. */}
+            {(() => {
+              const meal = getActionMeal();
+              const mealIndex = getActionMealIndex();
+              if (!meal || mealIndex == null || !actionTarget) return null;
+              const recipeDefault =
+                recipesById.get(meal.mealId)?.servings ?? 1;
+              const servings = meal.servingAmount ?? recipeDefault;
+              const colIdx = actionTarget.colIdx;
+              return (
+                <div className="flex items-center justify-between rounded-lg border border-border px-3 h-12">
+                  <span className="text-sm font-medium">Servings</span>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg"
+                      disabled={servings <= 0.5}
+                      onClick={() =>
+                        setServingsAt(
+                          colIdx,
+                          mealIndex,
+                          Math.max(0.5, servings - 0.5)
+                        )
+                      }
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </Button>
+                    <span className="min-w-[28px] text-center text-sm font-semibold tabular-nums">
+                      {servings}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg"
+                      onClick={() => setServingsAt(colIdx, mealIndex, servings + 0.5)}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
             <Button
               variant="outline"
               className="w-full justify-start gap-3 h-12"
               onClick={() => {
-                const meal = actionTarget
-                  ? getMeal(actionTarget.colIdx, actionTarget.category)
-                  : undefined;
+                const meal = getActionMeal();
                 setActionOpen(false);
                 if (meal) router.push(`/recipes/${meal.mealId}`);
               }}
@@ -512,7 +814,11 @@ export function WeeklyView({
               onClick={() => {
                 const target = actionTarget;
                 setActionOpen(false);
-                if (target) openPicker(target.colIdx, target.category);
+                if (target)
+                  openPicker(target.colIdx, target.category, {
+                    mode: "replace",
+                    mealIndex: target.mealIndex,
+                  });
               }}
             >
               <ArrowLeftRight className="h-5 w-5" />
@@ -524,11 +830,214 @@ export function WeeklyView({
               onClick={() => {
                 const target = actionTarget;
                 setActionOpen(false);
-                if (target) removeMeal(target.colIdx, target.category);
+                if (!target) return;
+                if (target.mealIndex != null) {
+                  removeMealAt(target.colIdx, target.mealIndex);
+                } else {
+                  removeMeal(target.colIdx, target.category);
+                }
               }}
             >
               <Trash2 className="h-5 w-5" />
               Remove from plan
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Expand sheet — components of a unified multi-recipe meal */}
+      <Dialog open={expandOpen} onOpenChange={setExpandOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader className="min-w-0">
+            <DialogTitle className="line-clamp-2 pr-8 leading-snug">
+              {expandTarget?.category ?? "Meal"}
+            </DialogTitle>
+          </DialogHeader>
+          {expandTarget &&
+            (() => {
+              const components = getCategoryMeals(
+                expandTarget.colIdx,
+                expandTarget.category
+              );
+              return (
+                <div className="flex flex-col gap-2 pt-1">
+                  {components.length >= 2 && (
+                    <ComboExpandHeader
+                      category={expandTarget.category}
+                      components={components}
+                    />
+                  )}
+                  {components.length >= 2 &&
+                    components.some((c) => cookableIds.has(c.meal.mealId)) && (
+                      <Button
+                        className="w-full justify-center gap-2 h-11"
+                        onClick={() => {
+                          const t = expandTarget;
+                          setExpandOpen(false);
+                          openCookAll(t.colIdx, t.category);
+                        }}
+                      >
+                        <Play className="h-4 w-4" />
+                        Start cooking all
+                      </Button>
+                    )}
+                  {components.map(({ meal, index }) => {
+                    const cookable = cookableIds.has(meal.mealId);
+                    return (
+                      <div
+                        key={index}
+                        className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 cursor-pointer hover:border-primary/40 transition-colors"
+                        onClick={() => {
+                          const t = expandTarget;
+                          setExpandOpen(false);
+                          openAction(t.colIdx, t.category, index);
+                        }}
+                      >
+                        {meal.mealPhoto ? (
+                          <img
+                            src={meal.mealPhoto}
+                            alt=""
+                            className="h-12 w-12 rounded-lg object-cover shrink-0"
+                          />
+                        ) : (
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-muted/60 to-muted shrink-0 p-1">
+                            <p className="text-[8px] font-semibold text-foreground/50 text-center line-clamp-3 leading-snug">
+                              {meal.mealName}
+                            </p>
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">
+                            {meal.mealName}
+                          </p>
+                          {meal.servingAmount != null && (
+                            <p className="text-xs text-muted-foreground">
+                              {meal.servingAmount}{" "}
+                              {meal.servingAmount === 1 ? "serving" : "servings"}
+                            </p>
+                          )}
+                        </div>
+                        {cookable && (
+                          <Button
+                            size="icon"
+                            className="h-9 w-9 rounded-full shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              launchCook(meal.mealId, meal.servingAmount);
+                            }}
+                          >
+                            <Play className="h-4 w-4 ml-0.5" />
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <Button
+                    variant="outline"
+                    className="w-full justify-center gap-2 h-11"
+                    onClick={() => {
+                      const t = expandTarget;
+                      setExpandOpen(false);
+                      openPicker(t.colIdx, t.category, { mode: "add" });
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add component
+                  </Button>
+                </div>
+              );
+            })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Cook all — confirm each recipe's servings, then start them together */}
+      <Dialog
+        open={cookAllOpen}
+        onOpenChange={(o) => {
+          if (!startingCookAll) setCookAllOpen(o);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader className="min-w-0">
+            <DialogTitle>Confirm servings</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            All recipes start together as tabs in one cooking session.
+          </p>
+          <div className="flex flex-col gap-2 pt-1 max-h-[50vh] overflow-y-auto">
+            {Object.entries(cookAllServings).map(([mealId, servings]) => {
+              const recipe = recipesById.get(mealId);
+              return (
+                <div
+                  key={mealId}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                >
+                  <span className="text-sm font-medium line-clamp-2 flex-1 min-w-0">
+                    {recipe?.title ?? "Recipe"}
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg"
+                      disabled={servings <= 0.5}
+                      onClick={() =>
+                        setCookAllServings((m) => ({
+                          ...m,
+                          [mealId]: Math.max(0.5, (m[mealId] ?? 1) - 0.5),
+                        }))
+                      }
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </Button>
+                    <span className="min-w-[24px] text-center text-sm font-semibold tabular-nums">
+                      {servings}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg"
+                      onClick={() =>
+                        setCookAllServings((m) => ({
+                          ...m,
+                          [mealId]: (m[mealId] ?? 1) + 0.5,
+                        }))
+                      }
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            {Object.keys(cookAllServings).length === 0 && (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                None of these recipes have cooking steps yet.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button
+              variant="outline"
+              className="flex-1"
+              disabled={startingCookAll}
+              onClick={() => setCookAllOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="flex-1"
+              disabled={
+                startingCookAll || Object.keys(cookAllServings).length === 0
+              }
+              onClick={handleStartCookAll}
+            >
+              {startingCookAll ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              Start cooking
             </Button>
           </div>
         </DialogContent>
@@ -540,8 +1049,12 @@ export function WeeklyView({
         category={pickerTarget?.category ?? ""}
         recipes={recipes}
         onSelect={handleMealSelect}
+        mode={pickerTarget?.mode ?? "replace"}
+        askServings
         onRemove={
-          pickerTarget
+          // Only the single-recipe slot offers an inline remove; multi-recipe
+          // components are removed from the action sheet instead.
+          !multiRecipePerMeal && pickerTarget
             ? () => {
                 removeMeal(pickerTarget.colIdx, pickerTarget.category);
                 setPickerOpen(false);
@@ -777,6 +1290,216 @@ function MobileMealCard({
           <Play className="h-4 w-4 ml-0.5" />
         </Button>
       )}
+    </div>
+  );
+}
+
+// ─── Combined "plate" pieces (unified multi-recipe view) ───
+
+// Grid of component photos shown until the AI combined image is ready.
+function ComboThumbStack({
+  components,
+  generating,
+}: {
+  components: { meal: PlanMeal; index: number }[];
+  generating: boolean;
+}) {
+  const shots = components.slice(0, 4);
+  return (
+    <>
+      <div
+        className={`h-full w-full grid gap-px ${
+          shots.length > 2 ? "grid-cols-2 grid-rows-2" : "grid-cols-2"
+        }`}
+      >
+        {shots.map(({ meal }, i) =>
+          meal.mealPhoto ? (
+            <img
+              key={i}
+              src={meal.mealPhoto}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div
+              key={i}
+              className="h-full w-full bg-gradient-to-br from-muted/60 to-muted"
+            />
+          )
+        )}
+      </div>
+      {generating && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+          <Loader2 className="h-4 w-4 animate-spin text-white" />
+        </div>
+      )}
+    </>
+  );
+}
+
+// Desktop/tablet unified cell: one AI plate photo + creative name for ≥2 recipes.
+function UnifiedGridCell({
+  components,
+  category,
+  onOpen,
+}: {
+  components: { meal: PlanMeal; index: number }[];
+  category: string;
+  onOpen: () => void;
+}) {
+  const mealIds = useMemo(
+    () => components.map((c) => c.meal.mealId),
+    [components]
+  );
+  const titles = useMemo(
+    () => components.map((c) => c.meal.mealName),
+    [components]
+  );
+  const { combo, generating } = useMealCombo({
+    mealIds,
+    titles,
+    category,
+    enabled: true,
+    autoGenerate: true,
+  });
+  const name = combo?.name || `${titles[0]} +${titles.length - 1}`;
+
+  return (
+    <div
+      className="group flex-1 flex flex-col 2xl:flex-row rounded-lg overflow-hidden cursor-pointer min-h-0 border border-border/40 bg-card hover:border-primary/40 hover:shadow-sm transition-all"
+      onClick={onOpen}
+    >
+      <div className="relative shrink-0 h-[65%] 2xl:h-full 2xl:w-[120px] overflow-hidden bg-muted">
+        {combo?.imageURL ? (
+          <img
+            src={combo.imageURL}
+            alt={name}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <ComboThumbStack components={components} generating={generating} />
+        )}
+        <span className="absolute top-1 right-1 rounded-full bg-black/55 text-white text-[9px] font-semibold px-1.5 py-0.5 leading-none backdrop-blur-sm">
+          {components.length} recipes
+        </span>
+      </div>
+      <div className="flex items-center gap-1 flex-1 px-1.5 min-h-0 2xl:flex-col 2xl:items-start 2xl:justify-center 2xl:px-2 2xl:py-1.5">
+        <p
+          className="flex-1 2xl:flex-none text-[10px] lg:text-xs font-semibold leading-tight line-clamp-2 min-w-0 2xl:w-full"
+          title={name}
+        >
+          {name}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Mobile unified card.
+function MobileUnifiedMealCard({
+  category,
+  components,
+  onOpen,
+}: {
+  category: string;
+  components: { meal: PlanMeal; index: number }[];
+  onOpen: () => void;
+}) {
+  const emoji = CATEGORY_EMOJI[category] ?? "";
+  const mealIds = useMemo(
+    () => components.map((c) => c.meal.mealId),
+    [components]
+  );
+  const titles = useMemo(
+    () => components.map((c) => c.meal.mealName),
+    [components]
+  );
+  const { combo, generating } = useMealCombo({
+    mealIds,
+    titles,
+    category,
+    enabled: true,
+    autoGenerate: true,
+  });
+  const name = combo?.name || `${titles[0]} +${titles.length - 1}`;
+
+  return (
+    <div
+      className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm cursor-pointer hover:border-primary/40 transition-colors"
+      onClick={onOpen}
+    >
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+        {combo?.imageURL ? (
+          <img
+            src={combo.imageURL}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <ComboThumbStack components={components} generating={generating} />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          {emoji} {category} · {components.length} recipes
+        </p>
+        <p className="text-sm font-semibold truncate">{name}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+    </div>
+  );
+}
+
+// Header inside the expand sheet — combined photo, name, and regenerate action.
+function ComboExpandHeader({
+  category,
+  components,
+}: {
+  category: string;
+  components: { meal: PlanMeal; index: number }[];
+}) {
+  const mealIds = useMemo(
+    () => components.map((c) => c.meal.mealId),
+    [components]
+  );
+  const titles = useMemo(
+    () => components.map((c) => c.meal.mealName),
+    [components]
+  );
+  const { combo, generating, regenerate } = useMealCombo({
+    mealIds,
+    titles,
+    category,
+    enabled: true,
+    autoGenerate: true,
+  });
+  const name = combo?.name || `${titles[0]} +${titles.length - 1}`;
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg bg-muted/40 p-2">
+      <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+        {combo?.imageURL ? (
+          <img
+            src={combo.imageURL}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <ComboThumbStack components={components} generating={generating} />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold leading-tight line-clamp-2">{name}</p>
+        <button
+          type="button"
+          className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary disabled:opacity-50"
+          onClick={() => regenerate()}
+          disabled={generating}
+        >
+          <Sparkles className="h-3 w-3" />
+          {generating ? "Generating…" : combo ? "Regenerate photo" : "Generate photo"}
+        </button>
+      </div>
     </div>
   );
 }

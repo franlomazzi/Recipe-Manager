@@ -17,6 +17,14 @@ export interface PlanMeal {
   mealName: string;
   mealPhoto?: string;
   macros: PlanMealMacros;
+  /**
+   * Number of servings for this component (e.g. how many you'll plate up).
+   * Shared verbatim with the food tracking app, which uses the same field name
+   * and the same meaning: macros and shopping quantities scale by
+   * `servingAmount / recipe.servings`. Absent ⇒ treat as the recipe's own
+   * default servings (×1), identical to single-recipe-per-meal behaviour.
+   */
+  servingAmount?: number;
 }
 
 export interface PlanDay {

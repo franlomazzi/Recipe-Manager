@@ -31,16 +31,16 @@ function getNextSlot(now: Date): { targetDate: Date; category: MealCategory } {
   return { targetDate: addDays(now, 1), category: "Breakfast" };
 }
 
-function findMealInInstance(
+function categoryMealsInInstance(
   instance: PlanInstance | null,
   date: Date,
   category: MealCategory
-): PlanMeal | null {
-  if (!instance) return null;
+): PlanMeal[] {
+  if (!instance) return [];
   const idx = getIndicesForDate(instance, date);
-  if (!idx) return null;
+  if (!idx) return [];
   const day = instance.snapshot[idx.weekIndex]?.days[idx.dayIndex];
-  return day?.meals.find((m) => m.category === category) ?? null;
+  return day?.meals.filter((m) => m.category === category) ?? [];
 }
 
 export default function DashboardPage() {
@@ -204,17 +204,25 @@ function KitchenToolDashboard({ firstName }: { firstName: string }) {
   const nextMeal = useMemo(() => {
     if (!now) return null;
     const { targetDate, category } = getNextSlot(now);
-    let meal = findMealInInstance(instance, targetDate, category);
-    if (!meal) {
+    let meals = categoryMealsInInstance(instance, targetDate, category);
+    if (meals.length === 0) {
       for (const w of adhocWeeks) {
-        meal = findMealInInstance(w, targetDate, category);
-        if (meal) break;
+        meals = categoryMealsInInstance(w, targetDate, category);
+        if (meals.length > 0) break;
       }
     }
-    if (!meal) return { meal: null, category, targetDate, photo: null as string | null };
+    const meal = meals[0] ?? null;
+    if (!meal)
+      return {
+        meal: null,
+        category,
+        targetDate,
+        photo: null as string | null,
+        extraCount: 0,
+      };
     const photo =
       meal.mealPhoto ?? recipes.find((r) => r.id === meal.mealId)?.photoURL ?? null;
-    return { meal, category, targetDate, photo };
+    return { meal, category, targetDate, photo, extraCount: meals.length - 1 };
   }, [now, instance, adhocWeeks, recipes]);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => {
@@ -272,6 +280,11 @@ function KitchenToolDashboard({ firstName }: { firstName: string }) {
             </div>
             <h2 className="kt-serif text-3xl font-semibold tracking-tight">
               {nextMeal?.meal ? nextMeal.meal.mealName : "Pick up where you left off"}
+              {nextMeal?.meal && nextMeal.extraCount > 0 && (
+                <span className="ml-2 text-xl font-normal text-muted-foreground">
+                  +{nextMeal.extraCount} more
+                </span>
+              )}
             </h2>
             <p className="text-sm text-muted-foreground mt-2">
               {nextMeal?.meal

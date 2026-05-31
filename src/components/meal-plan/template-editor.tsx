@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { MealPickerDialog } from "./meal-picker-dialog";
+import { useMealPlanPrefs } from "@/lib/hooks/use-meal-plan-prefs";
 import type {
   PlanTemplate,
   PlanWeek,
@@ -57,6 +58,7 @@ export function TemplateEditor({
 }: TemplateEditorProps) {
   const { user } = useAuth();
   const { recipes } = useRecipes();
+  const { multiRecipePerMeal } = useMealPlanPrefs();
   const isEditing = !!template;
 
   const [name, setName] = useState(template?.name ?? "");
@@ -72,6 +74,8 @@ export function TemplateEditor({
   const [pickerTarget, setPickerTarget] = useState<{
     dayIndex: number;
     category: string;
+    mode: "replace" | "add";
+    mealIndex?: number;
   } | null>(null);
 
   const currentWeek = weeks[currentWeekIdx];
@@ -82,46 +86,79 @@ export function TemplateEditor({
     );
   }
 
-  function openPicker(dayIndex: number, category: string) {
-    setPickerTarget({ dayIndex, category });
+  /** Components in a category, each paired with its absolute index in day.meals. */
+  function getCategoryMeals(
+    dayIndex: number,
+    category: string
+  ): { meal: PlanMeal; index: number }[] {
+    return currentWeek.days[dayIndex].meals
+      .map((meal, index) => ({ meal, index }))
+      .filter((x) => x.meal.category === category);
+  }
+
+  function updateDayMeals(
+    dayIndex: number,
+    updater: (meals: PlanMeal[]) => PlanMeal[]
+  ) {
+    setWeeks((prev) => {
+      const updated = [...prev];
+      const week = {
+        ...updated[currentWeekIdx],
+        days: [...updated[currentWeekIdx].days],
+      };
+      const day = { ...week.days[dayIndex] };
+      day.meals = updater(day.meals);
+      week.days[dayIndex] = day;
+      updated[currentWeekIdx] = week;
+      return updated;
+    });
+  }
+
+  function openPicker(
+    dayIndex: number,
+    category: string,
+    opts?: { mode?: "replace" | "add"; mealIndex?: number }
+  ) {
+    setPickerTarget({
+      dayIndex,
+      category,
+      mode: opts?.mode ?? "replace",
+      mealIndex: opts?.mealIndex,
+    });
     setPickerOpen(true);
   }
 
   function handleMealSelect(meal: PlanMeal) {
     if (!pickerTarget) return;
-    const { dayIndex, category } = pickerTarget;
+    const { dayIndex, category, mode, mealIndex } = pickerTarget;
 
-    setWeeks((prev) => {
-      const updated = [...prev];
-      const week = {
-        ...updated[currentWeekIdx],
-        days: [...updated[currentWeekIdx].days],
-      };
-      const day = { ...week.days[dayIndex] };
-      // Remove existing meal for this category, then add the new one
-      day.meals = [
-        ...day.meals.filter((m) => m.category !== category),
+    // Single-recipe mode: one meal per category (swap).
+    if (!multiRecipePerMeal) {
+      updateDayMeals(dayIndex, (meals) => [
+        ...meals.filter((m) => m.category !== category),
         meal,
-      ];
-      week.days[dayIndex] = day;
-      updated[currentWeekIdx] = week;
-      return updated;
-    });
+      ]);
+      return;
+    }
+
+    // Multi-recipe mode: append, or replace the targeted component.
+    if (mode === "add" || mealIndex == null) {
+      updateDayMeals(dayIndex, (meals) => [...meals, meal]);
+    } else {
+      updateDayMeals(dayIndex, (meals) =>
+        meals.map((m, i) => (i === mealIndex ? meal : m))
+      );
+    }
   }
 
   function removeMeal(dayIndex: number, category: string) {
-    setWeeks((prev) => {
-      const updated = [...prev];
-      const week = {
-        ...updated[currentWeekIdx],
-        days: [...updated[currentWeekIdx].days],
-      };
-      const day = { ...week.days[dayIndex] };
-      day.meals = day.meals.filter((m) => m.category !== category);
-      week.days[dayIndex] = day;
-      updated[currentWeekIdx] = week;
-      return updated;
-    });
+    updateDayMeals(dayIndex, (meals) =>
+      meals.filter((m) => m.category !== category)
+    );
+  }
+
+  function removeMealAt(dayIndex: number, mealIndex: number) {
+    updateDayMeals(dayIndex, (meals) => meals.filter((_, i) => i !== mealIndex));
   }
 
   function addWeek() {
@@ -159,9 +196,13 @@ export function TemplateEditor({
     }
   }
 
-  const currentMealId = pickerTarget
-    ? getMeal(pickerTarget.dayIndex, pickerTarget.category)?.mealId
-    : undefined;
+  const currentMealId =
+    pickerTarget && pickerTarget.mode !== "add"
+      ? pickerTarget.mealIndex != null
+        ? currentWeek.days[pickerTarget.dayIndex]?.meals[pickerTarget.mealIndex]
+            ?.mealId
+        : getMeal(pickerTarget.dayIndex, pickerTarget.category)?.mealId
+      : undefined;
 
   return (
     <>
@@ -271,6 +312,42 @@ export function TemplateEditor({
                       {category}
                     </div>
                     {DAYS_OF_WEEK.map((_, dayIdx) => {
+                      if (multiRecipePerMeal) {
+                        const components = getCategoryMeals(dayIdx, category);
+                        return (
+                          <div
+                            key={dayIdx}
+                            className="rounded-md border border-dashed border-border p-1 min-h-[56px] flex flex-col gap-1"
+                          >
+                            {components.map(({ meal, index }) => (
+                              <div
+                                key={index}
+                                className="flex items-start gap-1 rounded border border-primary/30 bg-primary/5 px-1 py-0.5"
+                              >
+                                <span className="text-[11px] leading-tight line-clamp-2 flex-1">
+                                  {meal.mealName}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="shrink-0 p-0.5 text-muted-foreground hover:text-destructive"
+                                  onClick={() => removeMealAt(dayIdx, index)}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              className="flex items-center justify-center rounded border border-dashed border-border py-0.5 hover:border-primary/50 hover:bg-muted/50 transition-colors"
+                              onClick={() =>
+                                openPicker(dayIdx, category, { mode: "add" })
+                              }
+                            >
+                              <Plus className="h-3 w-3 text-muted-foreground/50" />
+                            </button>
+                          </div>
+                        );
+                      }
                       const meal = getMeal(dayIdx, category);
                       return (
                         <button
@@ -335,8 +412,9 @@ export function TemplateEditor({
         category={pickerTarget?.category ?? ""}
         recipes={recipes}
         onSelect={handleMealSelect}
+        mode={pickerTarget?.mode ?? "replace"}
         onRemove={
-          pickerTarget
+          !multiRecipePerMeal && pickerTarget
             ? () => removeMeal(pickerTarget.dayIndex, pickerTarget.category)
             : undefined
         }

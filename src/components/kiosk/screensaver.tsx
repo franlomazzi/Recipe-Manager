@@ -5,6 +5,7 @@ import { useKioskSettings } from "@/lib/hooks/use-kiosk-settings";
 import { useActivePlan } from "@/lib/hooks/use-active-plan";
 import { useAdhocWeek } from "@/lib/hooks/use-adhoc-week";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
+import { useMealCombo } from "@/lib/hooks/use-meal-combo";
 import {
   MEAL_CATEGORIES,
   type PlanInstance,
@@ -105,6 +106,18 @@ export function Screensaver() {
     );
   }, [instance, adhocWeeks, now]);
 
+  // Group the day's meals by category, preserving the category sort order from
+  // `todaysMeals`. Each category may hold multiple components in multi-recipe mode.
+  const groupedMeals = useMemo<[string, PlanMeal[]][]>(() => {
+    const groups = new Map<string, PlanMeal[]>();
+    for (const m of todaysMeals) {
+      const arr = groups.get(m.category) ?? [];
+      arr.push(m);
+      groups.set(m.category, arr);
+    }
+    return Array.from(groups.entries());
+  }, [todaysMeals]);
+
   const nextMeal = useMemo(() => {
     if (!todaysMeals.length) return null;
     const hour = now.getHours();
@@ -152,23 +165,66 @@ export function Screensaver() {
           </div>
         )}
 
-        {todaysMeals.length > 0 && (
-          <div className="mt-6 flex flex-col gap-1">
-            {todaysMeals.map((m, i) => (
-              <div
-                key={`${m.category}-${i}`}
-                className="text-base text-white/40"
-              >
-                <span className="uppercase tracking-wider">{m.category}</span>
-                <span className="mx-2">·</span>
-                <span>{m.mealName}</span>
-              </div>
+        {groupedMeals.length > 0 && (
+          <div className="mt-6 flex flex-col gap-3">
+            {groupedMeals.map(([category, meals]) => (
+              <ScreensaverMealGroup
+                key={category}
+                category={category}
+                meals={meals}
+              />
             ))}
           </div>
         )}
 
         <div className="mt-12 text-xs text-white/30">Tap to dismiss</div>
       </div>
+    </div>
+  );
+}
+
+// One category line on the screensaver. For a multi-recipe meal it shows the AI
+// combined photo + name when one has already been generated (no generation is
+// triggered here); otherwise it lists the component names.
+function ScreensaverMealGroup({
+  category,
+  meals,
+}: {
+  category: string;
+  meals: PlanMeal[];
+}) {
+  const isCombo = meals.length >= 2;
+  const { combo } = useMealCombo({
+    mealIds: meals.map((m) => m.mealId),
+    titles: meals.map((m) => m.mealName),
+    category,
+    enabled: isCombo,
+    autoGenerate: false,
+  });
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <span className="text-sm uppercase tracking-widest text-white/30">
+        {category}
+      </span>
+      {isCombo && combo?.imageURL && (
+        <img
+          src={combo.imageURL}
+          alt=""
+          className="mb-1 h-20 w-20 rounded-lg object-cover opacity-80"
+        />
+      )}
+      {isCombo ? (
+        <span className="text-base text-white/60">
+          {combo?.name || meals.map((m) => m.mealName).join(" · ")}
+        </span>
+      ) : (
+        meals.map((m, i) => (
+          <span key={`${m.mealId}-${i}`} className="text-base text-white/60">
+            {m.mealName}
+          </span>
+        ))
+      )}
     </div>
   );
 }

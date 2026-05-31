@@ -818,6 +818,17 @@ export function RecipeForm({
     const preLinkQty = ingredients[index]?.quantity;
     const preLinkNote = ingredients[index]?.note ?? "";
 
+    // When the recipe's unit differs from the library's canonical unit and
+    // there's an amount to carry over, the quantity needs a real (density-
+    // aware) conversion before it means anything in the canonical unit. We must
+    // NOT keep the original number under the new unit — that silently turns
+    // "4 tbsp ginger" into "4 g ginger". So we clear the quantity up front and
+    // let the async conversion below fill it in. If the conversion fails the
+    // field stays blank, prompting the user to enter the canonical amount by
+    // hand instead of trusting a fabricated number.
+    const needsConversion =
+      !!preLinkUnit && preLinkUnit !== item.servingUnit && preLinkQty != null;
+
     setIngredients((prev) => {
       const updated = [...prev];
       // Adopt the library's reference unit on link. Scaling is only coherent
@@ -835,13 +846,15 @@ export function RecipeForm({
         ...(item.fiber !== undefined && { fiber: item.fiber }),
         ...(item.netCarbs !== undefined && { netCarbs: item.netCarbs }),
       };
-      const scaled = scaleFromReference(reference, updated[index].quantity);
+      const nextQuantity = needsConversion ? null : updated[index].quantity;
+      const scaled = scaleFromReference(reference, nextQuantity);
 
       updated[index] = {
         ...updated[index],
         id: item.id,
         name: item.name,
         unit: reference.unit,
+        quantity: nextQuantity,
         reference,
         ...scaled,
         category: guessIngredientCategory(item.name),
@@ -883,11 +896,15 @@ export function RecipeForm({
       );
     }
 
-    // If the pre-link unit differs from the library's canonical unit, use AI
-    // to convert the quantity. This handles e.g. "0.25 tsp" linked to a
-    // library item tracked in grams.
-    if (user && preLinkUnit && preLinkUnit !== item.servingUnit && preLinkQty != null) {
-      const conversion = await getOrFetchConversion(user.uid, item, preLinkUnit);
+    // Fill the (cleared) canonical-unit quantity via AI conversion. This
+    // handles e.g. "0.25 tsp" linked to a library item tracked in grams. On
+    // success the row's amount becomes correct in the library unit; on failure
+    // we leave the quantity blank (cleared above) and ask the user to enter it
+    // manually, rather than presenting a fabricated number.
+    if (needsConversion) {
+      const conversion = user
+        ? await getOrFetchConversion(user.uid, item, preLinkUnit)
+        : null;
       if (conversion) {
         setIngredients((prev) => {
           const idx = prev.findIndex((i) => i.id === item.id);
@@ -906,8 +923,8 @@ export function RecipeForm({
         });
       } else {
         toast.warning(
-          `Couldn't auto-convert ${item.name} from ${preLinkUnit} to ${item.servingUnit} — review manually.`,
-          { duration: 5000 }
+          `Couldn't auto-convert ${item.name} from ${preLinkUnit} to ${item.servingUnit} — enter the amount in ${item.servingUnit} manually (imported as ${preLinkQty} ${preLinkUnit}).`,
+          { duration: 8000 }
         );
       }
     }

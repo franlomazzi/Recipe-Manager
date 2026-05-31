@@ -22,7 +22,12 @@ const CATEGORY_EMOJI: Record<string, string> = {
 
 export function MealPlanPreferences() {
   const { user } = useAuth();
-  const { forceShow, toggleForceShow } = useMealPlanPrefs();
+  const {
+    forceShow,
+    toggleForceShow,
+    multiRecipePerMeal,
+    toggleMultiRecipePerMeal,
+  } = useMealPlanPrefs();
 
   if (!user) return null;
 
@@ -40,6 +45,25 @@ export function MealPlanPreferences() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Multiple recipes per meal */}
+        <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+          <div className="min-w-0 pr-3">
+            <p className="text-sm font-medium">Multiple recipes per meal</p>
+            <p className="text-xs text-muted-foreground">
+              Build a meal from several recipes (e.g. steak + salad + potatoes),
+              each with its own servings.
+            </p>
+          </div>
+          <Switch
+            checked={multiRecipePerMeal}
+            onCheckedChange={(checked) => toggleMultiRecipePerMeal(checked)}
+          />
+        </div>
+
+        <div className="pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Always-visible rows
+        </div>
+
         {MEAL_CATEGORIES.map((category) => (
           <div
             key={category}

@@ -289,6 +289,12 @@ export default function ShoppingListPage() {
   const [pendingScope, setPendingScope] = useState<PantryScope>("household");
   // Name of a brand-new ingredient being created via the creation dialog
   const [creatingPantryIngredient, setCreatingPantryIngredient] = useState<string | null>(null);
+  // Default scope applied when adding from a specific pantry subsection, so the
+  // Household/Individual prompt pre-selects to match where the user clicked Add.
+  const [pantryAddScope, setPantryAddScope] = useState<PantryScope>("household");
+  // Collapsed/expanded state for the two household-mode pantry subsections.
+  const [myPantryOpen, setMyPantryOpen] = useState(true);
+  const [householdPantryOpen, setHouseholdPantryOpen] = useState(true);
 
   const weekRange = useMemo(() => {
     const start = addDays(calendarWeekMeta.firstMonday, weekIndex * 7);
@@ -869,6 +875,12 @@ export default function ShoppingListPage() {
     toast.success(`Added ${name} to your pantry`);
   }
 
+  // Open the pantry editor pre-defaulted to a scope, so adds land where expected.
+  function openPantryEditor(scope: PantryScope) {
+    setPantryAddScope(scope);
+    setEditPantryOpen(true);
+  }
+
   function handleAddPantryItem(existing?: LibraryIngredient) {
     const name = pantryNewName.trim();
     if (!existing && !name) return;
@@ -882,7 +894,7 @@ export default function ShoppingListPage() {
       if (partnerUid) {
         setPantryNewName("");
         setPendingAdd({ name: match.name, existing: match });
-        setPendingScope("household");
+        setPendingScope(pantryAddScope);
       } else {
         void commitAddPantryItem(match, match.name, "individual");
       }
@@ -1686,7 +1698,7 @@ export default function ShoppingListPage() {
           </div>
         </div>
 
-        {pantryItems.length === 0 ? (
+        {pantryItems.length === 0 && !partnerUid ? (
           <Card className="pt-0 border-dashed">
             <CardContent className="px-4 py-3 text-xs text-muted-foreground">
               No pantry items yet. Click <strong>Edit</strong> to add the staples
@@ -1695,115 +1707,184 @@ export default function ShoppingListPage() {
           </Card>
         ) : partnerUid ? (
           // ── Household mode: two independent subsections ──────────────────
+          // My Pantry (individual) is shown first, then Household. Each can be
+          // collapsed and shows how many of its items still need shopping this week.
           <div className="space-y-3">
-            {/* Household subsection */}
+            {/* Individual subsection ("My Pantry") */}
             {(() => {
-              const householdItems = pantryItems.filter(p => p.scope === "household");
-              if (householdItems.length === 0) return null;
+              const individualItems = pantryItems.filter(p => p.scope === "individual");
+              const pending = individualPantryProcessed
+                ? 0
+                : individualItems.filter(p => !individualPantryCheckedIds.includes(p.id)).length;
               return (
                 <div className="space-y-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-600 dark:text-violet-400 px-0.5">
-                    Household
-                  </p>
-                  {pantryProcessed ? (
-                    <PantryCommittedBanner
-                      stamp={pantryProcessedStamp}
-                      currentUid={user?.uid}
-                      household={household}
-                      onReopen={handleReopenHouseholdPantry}
-                      onUndo={() => setUndoHouseholdOpen(true)}
-                    />
-                  ) : (
-                    <Card className="pt-0">
-                      <CardContent className="p-0">
-                        <div className="px-4 py-2 text-[11px] text-muted-foreground border-b bg-muted/30">
-                          Tick the items you have enough of. The rest will be added to
-                          your shopping list.
-                        </div>
-                        <div className="divide-y">
-                          {householdItems.map((p) => {
-                            const skip = pantryCheckedIds.includes(p.id);
-                            const skipStamp = skip ? pantryCheckedProvenance.get(p.id) : null;
-                            return (
-                              <PantryCheckRow
-                                key={p.id}
-                                item={p}
-                                skip={skip}
-                                skipStamp={skipStamp ?? null}
-                                household={household}
-                                onToggle={() => handleTogglePantry(p.id, p.scope)}
-                              />
-                            );
-                          })}
-                        </div>
-                        <div className="px-4 py-3 border-t flex justify-end">
-                          <Button
-                            size="sm"
-                            className="rounded-xl"
-                            onClick={() => setCommitPantryConfirmOpen(true)}
-                          >
-                            <Plus className="mr-1.5 h-3.5 w-3.5" />
-                            Add household items
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
+                  <div className="flex items-center justify-between gap-2 px-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setMyPantryOpen((o) => !o)}
+                      className="flex items-center gap-1.5 text-left"
+                    >
+                      <ChevronDown
+                        className={`h-3 w-3 text-muted-foreground transition-transform ${myPantryOpen ? "" : "-rotate-90"}`}
+                      />
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        My Pantry
+                      </span>
+                      <span className="text-[11px] font-normal normal-case text-muted-foreground/60">
+                        ({pending} for this week)
+                      </span>
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1.5 text-[11px]"
+                      onClick={() => openPantryEditor("individual")}
+                    >
+                      <Plus className="mr-0.5 h-3 w-3" />
+                      Add
+                    </Button>
+                  </div>
+                  {myPantryOpen && (
+                    individualItems.length === 0 ? (
+                      <Card className="pt-0 border-dashed">
+                        <CardContent className="px-4 py-3 text-xs text-muted-foreground">
+                          No personal pantry items yet. Click <strong>Add</strong> to
+                          add staples only you see.
+                        </CardContent>
+                      </Card>
+                    ) : individualPantryProcessed ? (
+                      <PantryCommittedBanner
+                        stamp={null}
+                        currentUid={user?.uid}
+                        household={household}
+                        personal
+                        onReopen={handleReopenIndividualPantry}
+                        onUndo={() => setUndoIndividualOpen(true)}
+                      />
+                    ) : (
+                      <Card className="pt-0">
+                        <CardContent className="p-0">
+                          <div className="divide-y">
+                            {individualItems.map((p) => {
+                              const skip = individualPantryCheckedIds.includes(p.id);
+                              return (
+                                <PantryCheckRow
+                                  key={p.id}
+                                  item={p}
+                                  skip={skip}
+                                  skipStamp={null}
+                                  household={null}
+                                  onToggle={() => handleTogglePantry(p.id, p.scope)}
+                                  locked={isWeekClosed}
+                                />
+                              );
+                            })}
+                          </div>
+                          <div className="px-4 py-3 border-t flex justify-end">
+                            <Button
+                              size="sm"
+                              className="rounded-xl bg-slate-600 text-white hover:bg-slate-700 dark:bg-slate-500 dark:hover:bg-slate-600"
+                              onClick={() => void handleCommitIndividualPantry()}
+                              disabled={isWeekClosed}
+                            >
+                              <Plus className="mr-1.5 h-3.5 w-3.5" />
+                              Add My Pantry items to shopping list
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
                   )}
                 </div>
               );
             })()}
 
-            {/* Individual subsection */}
+            {/* Household subsection */}
             {(() => {
-              const individualItems = pantryItems.filter(p => p.scope === "individual");
-              if (individualItems.length === 0) return null;
+              const householdItems = pantryItems.filter(p => p.scope === "household");
+              const pending = pantryProcessed
+                ? 0
+                : householdItems.filter(p => !pantryCheckedIds.includes(p.id)).length;
               return (
                 <div className="space-y-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-0.5">
-                    My Pantry
-                  </p>
-                  {individualPantryProcessed ? (
-                    <PantryCommittedBanner
-                      stamp={null}
-                      currentUid={user?.uid}
-                      household={household}
-                      personal
-                      onReopen={handleReopenIndividualPantry}
-                      onUndo={() => setUndoIndividualOpen(true)}
-                    />
-                  ) : (
-                    <Card className="pt-0">
-                      <CardContent className="p-0">
-                        <div className="divide-y">
-                          {individualItems.map((p) => {
-                            const skip = individualPantryCheckedIds.includes(p.id);
-                            return (
-                              <PantryCheckRow
-                                key={p.id}
-                                item={p}
-                                skip={skip}
-                                skipStamp={null}
-                                household={null}
-                                onToggle={() => handleTogglePantry(p.id, p.scope)}
-                                locked={isWeekClosed}
-                              />
-                            );
-                          })}
-                        </div>
-                        <div className="px-4 py-3 border-t flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="rounded-xl"
-                            onClick={() => void handleCommitIndividualPantry()}
-                            disabled={isWeekClosed}
-                          >
-                            <Plus className="mr-1.5 h-3.5 w-3.5" />
-                            Add my items
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
+                  <div className="flex items-center justify-between gap-2 px-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setHouseholdPantryOpen((o) => !o)}
+                      className="flex items-center gap-1.5 text-left"
+                    >
+                      <ChevronDown
+                        className={`h-3 w-3 text-muted-foreground transition-transform ${householdPantryOpen ? "" : "-rotate-90"}`}
+                      />
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+                        Household
+                      </span>
+                      <span className="text-[11px] font-normal normal-case text-muted-foreground/60">
+                        ({pending} for this week)
+                      </span>
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1.5 text-[11px]"
+                      onClick={() => openPantryEditor("household")}
+                    >
+                      <Plus className="mr-0.5 h-3 w-3" />
+                      Add
+                    </Button>
+                  </div>
+                  {householdPantryOpen && (
+                    householdItems.length === 0 ? (
+                      <Card className="pt-0 border-dashed">
+                        <CardContent className="px-4 py-3 text-xs text-muted-foreground">
+                          No household pantry items yet. Click <strong>Add</strong> to
+                          add staples shared with your partner.
+                        </CardContent>
+                      </Card>
+                    ) : pantryProcessed ? (
+                      <PantryCommittedBanner
+                        stamp={pantryProcessedStamp}
+                        currentUid={user?.uid}
+                        household={household}
+                        onReopen={handleReopenHouseholdPantry}
+                        onUndo={() => setUndoHouseholdOpen(true)}
+                      />
+                    ) : (
+                      <Card className="pt-0">
+                        <CardContent className="p-0">
+                          <div className="px-4 py-2 text-[11px] text-muted-foreground border-b bg-muted/30">
+                            Tick the items you have enough of. The rest will be added to
+                            your shopping list.
+                          </div>
+                          <div className="divide-y">
+                            {householdItems.map((p) => {
+                              const skip = pantryCheckedIds.includes(p.id);
+                              const skipStamp = skip ? pantryCheckedProvenance.get(p.id) : null;
+                              return (
+                                <PantryCheckRow
+                                  key={p.id}
+                                  item={p}
+                                  skip={skip}
+                                  skipStamp={skipStamp ?? null}
+                                  household={household}
+                                  onToggle={() => handleTogglePantry(p.id, p.scope)}
+                                />
+                              );
+                            })}
+                          </div>
+                          <div className="px-4 py-3 border-t flex justify-end">
+                            <Button
+                              size="sm"
+                              className="rounded-xl bg-violet-600 text-white hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-600"
+                              onClick={() => setCommitPantryConfirmOpen(true)}
+                            >
+                              <Plus className="mr-1.5 h-3.5 w-3.5" />
+                              Add Household items to shopping list
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
                   )}
                 </div>
               );
@@ -2208,6 +2289,7 @@ export default function ShoppingListPage() {
         <CreatePantryIngredientDialog
           name={creatingPantryIngredient}
           partnerUid={partnerUid}
+          defaultScope={pantryAddScope}
           locations={locations}
           categories={categories}
           locationMap={locationMap}
@@ -2878,6 +2960,7 @@ function PantryAddCombobox({
 function CreatePantryIngredientDialog({
   name,
   partnerUid,
+  defaultScope = "household",
   locations,
   categories,
   locationMap,
@@ -2886,6 +2969,7 @@ function CreatePantryIngredientDialog({
 }: {
   name: string;
   partnerUid: string | null | undefined;
+  defaultScope?: PantryScope;
   locations: import("@/lib/types/shopping-organization").ShoppingLocation[];
   categories: import("@/lib/types/shopping-organization").IngredientCategoryDef[];
   locationMap: Map<string, import("@/lib/types/shopping-organization").ShoppingLocation>;
@@ -2910,7 +2994,7 @@ function CreatePantryIngredientDialog({
   const [note, setNote] = useState("");
   const [priceInput, setPriceInput] = useState("");
   const [priceQtyInput, setPriceQtyInput] = useState("");
-  const [scope, setScope] = useState<PantryScope>("household");
+  const [scope, setScope] = useState<PantryScope>(defaultScope);
   const [saving, setSaving] = useState(false);
 
   const unitOptions = getUnitOptions();
