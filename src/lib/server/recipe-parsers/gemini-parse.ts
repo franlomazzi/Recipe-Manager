@@ -12,6 +12,7 @@ import { RECIPE_RESPONSE_SCHEMA, SYSTEM_PROMPT } from "./schema";
 import { normalizeToMetric } from "./unit-convert";
 import { fetchRecipePage, normalizeImportUrl, UrlFetchError } from "./fetch-url";
 import { extractRecipeContent } from "./html-extract";
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
 
 const MODEL = "gemini-3-flash-preview";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
@@ -82,13 +83,7 @@ function isTransientNetworkError(err: unknown): boolean {
 }
 
 async function doCallGemini(opts: CallOptions): Promise<DraftRecipe> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new GeminiParseError(
-      "Recipe import is not configured on the server.",
-      500
-    );
-  }
+  const apiKey = await getGeminiApiKey();
 
   const body = {
     contents: [{ role: "user", parts: opts.parts }],

@@ -370,6 +370,22 @@ export async function toggleSharedPantryCheckedKey(
   await patchPantryState(householdId, patch);
 }
 
+/**
+ * Drop a single purchase from the cost-balance ledger for a week without
+ * un-ticking the item on the shopping list. Used when an item was marked
+ * complete but shouldn't count toward what the household members owe each
+ * other (e.g. changed your mind at the store after ticking it off).
+ */
+export async function removePantryPurchase(
+  householdId: string,
+  weekKey: string,
+  key: string
+): Promise<void> {
+  await patchPantryState(householdId, {
+    [`pantryPurchasesByWeek.${weekKey}.${key}`]: deleteField(),
+  });
+}
+
 /** Manually adjust a recorded purchase cost (e.g. user paid less than estimated). */
 export async function updatePantryPurchaseCost(
   householdId: string,

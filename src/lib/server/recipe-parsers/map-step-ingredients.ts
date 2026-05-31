@@ -6,6 +6,8 @@
 // The caller is expected to be the recipe form; we do not modify the recipe —
 // we just produce the mapping, which the client applies to its local state.
 
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
+
 const MODEL = "gemini-3-flash-preview";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const TIMEOUT_MS = 90_000;
@@ -103,13 +105,7 @@ export async function mapIngredientsToSteps(input: {
   ingredients: StepMapperIngredientInput[];
   steps: StepMapperStepInput[];
 }): Promise<StepMapperResult[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new StepMapperError(
-      "Step mapping is not configured on the server.",
-      500
-    );
-  }
+  const apiKey = await getGeminiApiKey();
   if (!input.ingredients.length) {
     throw new StepMapperError("No ingredients to map.", 400);
   }

@@ -4,6 +4,8 @@
 // Only numerical ingredient quantities are scaled — time durations, temperatures,
 // and non-ingredient counts are left unchanged.
 
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
+
 const MODEL = "gemini-3-flash-preview";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const TIMEOUT_MS = 30_000;
@@ -71,10 +73,7 @@ export async function scaleStepInstructions(
   steps: StepScalerInput[],
   multiplier: number
 ): Promise<StepScalerResult[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new StepScalerError("Step scaling is not configured on the server.", 500);
-  }
+  const apiKey = await getGeminiApiKey();
   if (!steps.length) {
     throw new StepScalerError("No steps to scale.", 400);
   }

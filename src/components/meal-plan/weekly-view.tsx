@@ -286,6 +286,18 @@ export function WeeklyView({
     setExpandOpen(true);
   }
 
+  // Remove a component straight from the expand sheet; close it when the meal
+  // becomes empty so we don't leave a blank dialog open.
+  async function removeFromExpand(index: number) {
+    if (!expandTarget) return;
+    const remaining = getCategoryMeals(
+      expandTarget.colIdx,
+      expandTarget.category
+    ).length;
+    await removeMealAt(expandTarget.colIdx, index);
+    if (remaining <= 1) setExpandOpen(false);
+  }
+
   async function handleMealSelect(meal: PlanMeal) {
     if (!pickerTarget) return;
     const { colIdx, category, mode, mealIndex } = pickerTarget;
@@ -860,7 +872,7 @@ export function WeeklyView({
                 expandTarget.category
               );
               return (
-                <div className="flex flex-col gap-2 pt-1">
+                <div className="flex flex-col gap-2 pt-1 min-w-0">
                   {components.length >= 2 && (
                     <ComboExpandHeader
                       category={expandTarget.category}
@@ -929,6 +941,18 @@ export function WeeklyView({
                             <Play className="h-4 w-4 ml-0.5" />
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 rounded-full shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          aria-label="Remove from meal"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFromExpand(index);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     );
                   })}

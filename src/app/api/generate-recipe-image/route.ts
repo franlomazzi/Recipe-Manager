@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyAuthorizedCaller } from "@/lib/firebase/admin";
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
 
 // Server-side only — proxy to Google Gemini Imagen 4.0 to keep the API key
 // off the client. Mirrors the food tracking app's /api/generate-meal-image
@@ -32,14 +33,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("generate-recipe-image: GEMINI_API_KEY is not configured");
-      return NextResponse.json(
-        { error: "AI photo generation is not configured on the server." },
-        { status: 500 }
-      );
-    }
+    const apiKey = await getGeminiApiKey();
 
     const prompt =
       customPrompt && customPrompt.trim()

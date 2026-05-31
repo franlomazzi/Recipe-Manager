@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyAuthorizedCaller } from "@/lib/firebase/admin";
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
 
 const MODEL = "gemini-3-flash-preview";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
@@ -64,13 +65,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ factor: 1 });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Unit conversion is not configured on the server." },
-      { status: 500 }
-    );
-  }
+  const apiKey = await getGeminiApiKey();
 
   const ingredientLabel = brand
     ? `${ingredientName} (${brand})`

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyAuthorizedCaller } from "@/lib/firebase/admin";
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
 
 // Server-side proxy to Google Gemini TTS. Takes a short piece of text (a
 // recipe step, a timer confirmation, etc.) and returns natural-sounding
@@ -42,15 +43,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const apiKey =
-      process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("voice-speak: GEMINI_API_KEY is not configured");
-      return NextResponse.json(
-        { error: "AI voice is not configured on the server." },
-        { status: 500 }
-      );
-    }
+    const apiKey = await getGeminiApiKey();
 
     // Gemini TTS supports natural-language style instructions in the prompt
     // itself — wrapping the content in a "say like X:" preface changes

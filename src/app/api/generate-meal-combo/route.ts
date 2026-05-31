@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyAuthorizedCaller } from "@/lib/firebase/admin";
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
 
 // Server-side only. Builds the "combined plate" for a multi-recipe meal:
 //   1. Gemini text → a short creative dish name + an image prompt that
@@ -55,14 +56,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const apiKey =
-    process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "AI generation is not configured on the server." },
-      { status: 500 }
-    );
-  }
+  const apiKey = await getGeminiApiKey();
 
   const categoryHint = payload.category ? ` (a ${payload.category} meal)` : "";
   const list = titles.join(", ");

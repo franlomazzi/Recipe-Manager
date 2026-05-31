@@ -3,13 +3,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
-import { ArrowLeft, CheckCircle2, RotateCcw, Wallet } from "lucide-react";
+import { ArrowLeft, CheckCircle2, RotateCcw, Wallet, X } from "lucide-react";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useHousehold } from "@/lib/contexts/household-context";
 import { useHouseholdPantryState } from "@/lib/hooks/use-household-pantry-state";
 import {
   setPantryWeekSettlement,
   clearPantryWeekSettlement,
+  removePantryPurchase,
 } from "@/lib/firebase/household-pantry";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -117,6 +118,26 @@ export default function CostBalancePage() {
     setBusyWeek(week.weekKey);
     try {
       await setPantryWeekSettlement(householdId, week.weekKey, fromUid, toUid, amount);
+    } finally {
+      setBusyWeek(null);
+    }
+  }
+
+  async function handleRemovePurchase(
+    week: WeekSummary,
+    key: string,
+    name: string
+  ) {
+    if (!householdId) return;
+    if (
+      !window.confirm(
+        `Remove "${name}" from this week's cost balance? It stays ticked on the shopping list but won't count toward what you owe each other.`
+      )
+    )
+      return;
+    setBusyWeek(week.weekKey);
+    try {
+      await removePantryPurchase(householdId, week.weekKey, key);
     } finally {
       setBusyWeek(null);
     }
@@ -262,6 +283,18 @@ export default function CostBalancePage() {
                           <span className="font-mono tabular-nums">
                             ${purchase.cost.toFixed(2)}
                           </span>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${purchase.name} from cost balance`}
+                            title="Remove from cost balance"
+                            onClick={() =>
+                              handleRemovePurchase(week, key, purchase.name)
+                            }
+                            disabled={busy}
+                            className="ml-2 -mr-1 rounded p-1 text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 disabled:opacity-40"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
                         </li>
                       ))}
                     </ul>

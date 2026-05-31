@@ -250,6 +250,35 @@ export function subscribeToAdhocInstances(
   });
 }
 
+/**
+ * Read-only variant of {@link subscribeToAdhocInstances} for another household
+ * member's plan (e.g. the screensaver showing a partner's meals). It never
+ * deletes past-week docs — those belong to the other user and cleanup is the
+ * owner's responsibility.
+ */
+export function subscribeToAdhocInstancesReadOnly(
+  userId: string,
+  callback: (instances: Map<string, PlanInstance>) => void
+): Unsubscribe {
+  const db = getDb();
+  const currentMonday = currentWeekMonday();
+  const q = query(
+    collection(db, INSTANCES),
+    where("userId", "==", userId),
+    where("status", "==", "adhoc")
+  );
+  return onSnapshot(q, (snap) => {
+    const map = new Map<string, PlanInstance>();
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (data.startDate >= currentMonday) {
+        map.set(data.startDate, { ...data, id: d.id } as PlanInstance);
+      }
+    });
+    callback(map);
+  });
+}
+
 /** Create a freestyle instance for a specific week (identified by its Monday ISO). */
 export async function createAdhocInstance(
   userId: string,

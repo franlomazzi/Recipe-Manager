@@ -31,5 +31,5 @@ env:
   # app already uses in this project (workout-app-7da24), so all apps share
   # one source of truth for this value.
   - variable: GEMINI_API_KEY
-    secret: GEMINI_API_KEY
+    secret: GEMINI_API_KEY_RECIPE_MANAGER
     availability: [BUILD, RUNTIME]

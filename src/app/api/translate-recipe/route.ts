@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyAuthorizedCaller } from "@/lib/firebase/admin";
 import { RECIPE_RESPONSE_SCHEMA } from "@/lib/server/recipe-parsers/schema";
 import type { DraftRecipe } from "@/lib/types/import";
+import { getGeminiApiKey } from "@/lib/server/gemini-key";
 
 // POST /api/translate-recipe
 //
@@ -54,13 +55,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Translation is not configured on the server." },
-      { status: 500 }
-    );
-  }
+  const apiKey = await getGeminiApiKey();
 
   const langName = targetLanguage === "en" ? "English" : "Spanish";
 
