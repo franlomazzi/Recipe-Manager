@@ -55,13 +55,36 @@ export function subscribeToShoppingListState(
 
 export async function toggleCheckedKey(
   userId: string,
+  weekKey: string,
   currentChecked: string[],
   key: string
 ) {
-  const checkedKeys = currentChecked.includes(key)
+  const next = currentChecked.includes(key)
     ? currentChecked.filter((k) => k !== key)
     : [...currentChecked, key];
-  await patchOrCreate(userId, { checkedKeys });
+  await patchOrCreate(userId, { [`checkedKeysByWeek.${weekKey}`]: next });
+}
+
+/**
+ * One-time migration: move the legacy global `checkedKeys` array into the
+ * per-week `checkedKeysByWeek` map under the current ISO week, then clear the
+ * legacy field. Without a week association the only reasonable home is the week
+ * the user is shopping now. Safe to call repeatedly (no-op once cleared).
+ */
+export async function migrateGlobalCheckedKeys(
+  userId: string,
+  currentWeekKey: string,
+  state: ShoppingListState
+) {
+  const legacy = state.checkedKeys ?? [];
+  if (legacy.length === 0) return;
+  // Merge into anything already recorded for the current week.
+  const existing = state.checkedKeysByWeek?.[currentWeekKey] ?? [];
+  const merged = Array.from(new Set([...existing, ...legacy]));
+  await patchOrCreate(userId, {
+    [`checkedKeysByWeek.${currentWeekKey}`]: merged,
+    checkedKeys: [],
+  });
 }
 
 /** Remove all extra (manually-added) recipes for a specific week. */
@@ -174,8 +197,26 @@ export async function migrateWeekKey(
   await patchOrCreate(userId, patch);
 }
 
-export async function clearAllChecked(userId: string) {
-  await patchOrCreate(userId, { checkedKeys: [] });
+/** Clear the "Completed" record for a single week. */
+export async function clearAllChecked(userId: string, weekKey: string) {
+  await patchOrCreate(userId, { [`checkedKeysByWeek.${weekKey}`]: [] });
+}
+
+/**
+ * Uncheck a specific set of item keys for a week, leaving every other checked
+ * item intact. Used to reset only the items from this week's planned recipes
+ * without disturbing extra-recipe, pantry, or custom-item checks.
+ */
+export async function uncheckKeysForWeek(
+  userId: string,
+  weekKey: string,
+  currentChecked: string[],
+  keysToUncheck: string[]
+): Promise<void> {
+  const remove = new Set(keysToUncheck);
+  const next = currentChecked.filter((k) => !remove.has(k));
+  if (next.length === currentChecked.length) return;
+  await patchOrCreate(userId, { [`checkedKeysByWeek.${weekKey}`]: next });
 }
 
 export async function closeWeek(userId: string, weekKey: string): Promise<void> {

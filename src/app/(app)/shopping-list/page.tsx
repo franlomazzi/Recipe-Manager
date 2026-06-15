@@ -13,6 +13,7 @@ import {
   removeExtraEntry,
   updateCustomItems,
   clearAllChecked,
+  uncheckKeysForWeek,
   setOneOffMeta,
   clearExtraRecipesForWeek,
   closeWeek,
@@ -276,7 +277,12 @@ export default function ShoppingListPage() {
   const [undoIndividualOpen, setUndoIndividualOpen] = useState(false);
   const [weekStatusConfirm, setWeekStatusConfirm] = useState<"close" | "reopen" | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  type ResetScope = "extraRecipes" | "pantryIndividual" | "pantryHousehold" | "everything";
+  type ResetScope =
+    | "plannedRecipes"
+    | "extraRecipes"
+    | "pantryIndividual"
+    | "pantryHousehold"
+    | "everything";
   const [resetScope, setResetScope] = useState<ResetScope>("everything");
   const [pantryNewName, setPantryNewName] = useState("");
   const [pantryAssigning, setPantryAssigning] = useState<PantryItem | null>(null);
@@ -452,7 +458,7 @@ export default function ShoppingListPage() {
       }
       return;
     }
-    await toggleCheckedKey(user.uid, checkedKeys, key);
+    await toggleCheckedKey(user.uid, weekKey, checkedKeys, key);
     if (wasUnchecked) {
       toast(`${item.name} checked`, {
         action: { label: "Undo", onClick: () => handleToggleRef.current(key) },
@@ -518,7 +524,7 @@ export default function ShoppingListPage() {
 
   async function handleClearChecked() {
     if (!user) return;
-    await clearAllChecked(user.uid);
+    await clearAllChecked(user.uid, weekKey);
     if (customItems.some((i) => i.checked)) {
       await updateCustomItems(
         user.uid,
@@ -764,6 +770,18 @@ export default function ShoppingListPage() {
   async function handleReset() {
     if (!user) return;
     setResetDialogOpen(false);
+    if (resetScope === "plannedRecipes") {
+      // Uncheck only the items contributed by this week's planned (meal-plan)
+      // recipes — e.g. things ticked off at the supermarket. Extra-recipe,
+      // pantry, and custom-item checks are left untouched.
+      const plannedIds = new Set(planRecipes.map((r) => r.id));
+      const plannedKeys = items
+        .filter((it) => !it.fromPantry && it.sources.some((s) => plannedIds.has(s.recipeId)))
+        .map((it) => it.key);
+      await uncheckKeysForWeek(user.uid, weekKey, checkedKeys, plannedKeys);
+      toast.success("Planned recipe items unchecked");
+      return;
+    }
     if (resetScope === "extraRecipes" || resetScope === "everything") {
       await clearExtraRecipesForWeek(user.uid, weekKey);
     }
@@ -774,7 +792,7 @@ export default function ShoppingListPage() {
       await undoLastPantryCommit(householdId, weekKey);
     }
     if (resetScope === "everything") {
-      await clearAllChecked(user.uid);
+      await clearAllChecked(user.uid, weekKey);
       if (customItems.some((i) => i.checked)) {
         await updateCustomItems(user.uid, customItems.map((i) => ({ ...i, checked: false })));
       }
@@ -1989,19 +2007,22 @@ export default function ShoppingListPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            {(["extraRecipes", "pantryIndividual", "pantryHousehold", "everything"] as const)
+            {(["plannedRecipes", "extraRecipes", "pantryIndividual", "pantryHousehold", "everything"] as const)
               .filter((s) => {
                 if (s === "pantryHousehold" && !householdId) return false;
+                if (s === "plannedRecipes" && planRecipes.length === 0) return false;
                 return true;
               })
               .map((s) => {
                 const labels: Record<string, string> = {
+                  plannedRecipes: "This week's planned recipes",
                   extraRecipes: "Extra recipes only",
                   pantryIndividual: "My pantry only (individual)",
                   pantryHousehold: "Household pantry only",
                   everything: "Everything this week",
                 };
                 const descriptions: Record<string, string> = {
+                  plannedRecipes: "Unchecks items from your meal-plan recipes (keeps the recipes)",
                   extraRecipes: "Removes manually-added recipes from the list",
                   pantryIndividual: "Undoes your personal pantry commit",
                   pantryHousehold: "Undoes the shared pantry commit (affects partner too)",

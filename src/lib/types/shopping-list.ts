@@ -64,8 +64,17 @@ export interface ExtraRecipeEntry {
 /** Persisted state in Firestore (shoppingLists/{userId}) */
 export interface ShoppingListState {
   userId: string;
-  /** Keys of items the user has checked off */
+  /**
+   * @deprecated Legacy global checked keys (not week-scoped). Migrated on load
+   * into `checkedKeysByWeek` under the current ISO week, then cleared. Reads
+   * should use `checkedKeysByWeek` instead.
+   */
   checkedKeys: string[];
+  /**
+   * Keys of items the user has checked off, per ISO week. Each week keeps its
+   * own "Completed" record so checks don't bleed across weeks.
+   */
+  checkedKeysByWeek?: Record<string, string[]>;
   /** Manually-added recipes per week: key = weekIndex as string */
   extraByWeek: Record<string, ExtraRecipeEntry[]>;
   /** Free-text items the user typed in manually */

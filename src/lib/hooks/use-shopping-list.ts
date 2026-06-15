@@ -8,6 +8,7 @@ import { useHouseholdPantryState } from "./use-household-pantry-state";
 import {
   subscribeToShoppingListState,
   migrateWeekKey,
+  migrateGlobalCheckedKeys,
 } from "@/lib/firebase/shopping-list";
 import {
   migratePantryWeekKey,
@@ -385,9 +386,15 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     [extraByWeek, weekKey, legacyKey]
   );
 
+  // Per-week checked keys — each week keeps its own "Completed" record so a
+  // check on one week never carries over to another.
+  const checkedKeysForWeek = useMemo(
+    () => state?.checkedKeysByWeek?.[weekKey] ?? [],
+    [state, weekKey]
+  );
   const checkedKeys = useMemo(
-    () => new Set(state?.checkedKeys ?? []),
-    [state]
+    () => new Set(checkedKeysForWeek),
+    [checkedKeysForWeek]
   );
 
   // Household pantry data — sourced from the household pantry state doc.
@@ -503,6 +510,16 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     [sharedPantryCheckedRawForWeek]
   );
 
+  // Best-effort one-time migration: the legacy global `checkedKeys` array wasn't
+  // week-scoped, so its checks leaked across every week. Move it into the current
+  // real ISO week (the week the user is shopping now) and clear the global field.
+  useEffect(() => {
+    if (!user || !state) return;
+    if (!state.checkedKeys || state.checkedKeys.length === 0) return;
+    const currentWeekKey = isoWeekKey(parseISO(shoppingCurrentMonday()));
+    void migrateGlobalCheckedKeys(user.uid, currentWeekKey, state);
+  }, [user, state]);
+
   // Best-effort one-time migration: if legacy numeric-offset data exists for
   // this week, copy it to the new ISO-week key and delete the legacy entry.
   useEffect(() => {
@@ -589,7 +606,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     weekKey,
     items,
     customItems,
-    checkedKeys: state?.checkedKeys ?? [],
+    checkedKeys: checkedKeysForWeek,
     extraByWeek,
     oneOffByWeek,
     oneOffForWeek,
