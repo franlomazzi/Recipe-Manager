@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { verifyAuthorizedCaller } from "@/lib/firebase/admin";
 import { getGeminiApiKey } from "@/lib/server/gemini-key";
 
-// Server-side only — proxy to Google Gemini Imagen 4.0 to keep the API key
-// off the client. Mirrors the food tracking app's /api/generate-meal-image
-// route so we share the same key, model, and response shape.
+// Server-side only — proxy to Google's Gemini image-generation model to keep
+// the API key off the client.
+//
+// Migrated off Imagen 4.0 (deprecated, shuts down 2026-08-17) to
+// gemini-2.5-flash-image, which uses the :generateContent endpoint and returns
+// the image as inlineData base64 (PNG) rather than Imagen's predictions[].
+// We extract it and return a flat { image, mimeType } shape to the client.
 //
 // AUTH: every request must carry a valid Firebase ID token in the
 // `Authorization: Bearer <token>` header, AND the token's uid must be in the
@@ -40,16 +44,15 @@ export async function POST(req: Request) {
         ? customPrompt.trim()
         : `A professional, high-quality food photography shot of ${title}. Delicious, appetizing, cinematic lighting, gourmet presentation.`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        instances: [{ prompt }],
-        parameters: {
-          sampleCount: 1,
-          aspectRatio: "1:1",
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"],
         },
       }),
     });
@@ -68,8 +71,31 @@ export async function POST(req: Request) {
       }
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
+        };
+      }>;
+    };
+    // The model can return both a text part and an image part — pick the image.
+    const imgPart = data.candidates?.[0]?.content?.parts?.find(
+      (p) => p.inlineData?.data
+    )?.inlineData;
+    if (!imgPart?.data) {
+      console.error(
+        "gemini image: no image in response",
+        JSON.stringify(data).slice(0, 400)
+      );
+      return NextResponse.json(
+        { error: "The AI returned no image. Try again." },
+        { status: 502 }
+      );
+    }
+    return NextResponse.json({
+      image: imgPart.data,
+      mimeType: imgPart.mimeType ?? "image/png",
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Internal server error";
     console.error("generate-recipe-image internal error:", error);

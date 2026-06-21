@@ -114,15 +114,19 @@ Return JSON with:
   }
 
   // ── 2. Combined plate image ──
-  const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
+  // Uses gemini-2.5-flash-image via :generateContent (image returned as
+  // inlineData base64 PNG). Migrated off Imagen 4.0, which is deprecated and
+  // shuts down 2026-08-17.
+  const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey}`;
   let image: string | undefined;
+  let imageMime = "image/png";
   try {
     const res = await fetch(imageUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        instances: [{ prompt: imagePrompt }],
-        parameters: { sampleCount: 1, aspectRatio: "1:1" },
+        contents: [{ parts: [{ text: imagePrompt }] }],
+        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
       }),
       signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
     });
@@ -135,9 +139,17 @@ Return JSON with:
       );
     }
     const data = (await res.json()) as {
-      predictions?: Array<{ bytesBase64Encoded?: string }>;
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
+        };
+      }>;
     };
-    image = data?.predictions?.[0]?.bytesBase64Encoded;
+    const part = data?.candidates?.[0]?.content?.parts?.find(
+      (p) => p.inlineData?.data
+    )?.inlineData;
+    image = part?.data;
+    if (part?.mimeType) imageMime = part.mimeType;
   } catch (err) {
     console.error("generate-meal-combo image internal error:", err);
     return NextResponse.json(
@@ -153,5 +165,5 @@ Return JSON with:
     );
   }
 
-  return NextResponse.json({ name, image });
+  return NextResponse.json({ name, image, mimeType: imageMime });
 }

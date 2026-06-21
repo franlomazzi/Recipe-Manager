@@ -1379,12 +1379,15 @@ function UnifiedGridCell({
     () => components.map((c) => c.meal.mealName),
     [components]
   );
-  const { combo, generating } = useMealCombo({
+  const { combo, generating, regenerate } = useMealCombo({
     mealIds,
     titles,
     category,
     enabled: true,
-    autoGenerate: true,
+    // On-demand only: don't auto-bill on render. Existing combos still load
+    // from the Firestore cache; new ones are made via the "Generate" chip
+    // below (or the expand sheet's button).
+    autoGenerate: false,
   });
   const name = combo?.name || `${titles[0]} +${titles.length - 1}`;
 
@@ -1402,6 +1405,21 @@ function UnifiedGridCell({
           />
         ) : (
           <ComboThumbStack components={components} generating={generating} />
+        )}
+        {!combo?.imageURL && !generating && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void regenerate();
+            }}
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded-full bg-primary/90 text-primary-foreground text-[9px] font-semibold px-2 py-1 leading-none shadow hover:bg-primary"
+            aria-label="Generate combined photo"
+            title="Generate combined photo"
+          >
+            <Sparkles className="h-3 w-3" />
+            Generate
+          </button>
         )}
         <span className="absolute top-1 right-1 rounded-full bg-black/55 text-white text-[9px] font-semibold px-1.5 py-0.5 leading-none backdrop-blur-sm">
           {components.length} recipes
@@ -1438,12 +1456,14 @@ function MobileUnifiedMealCard({
     () => components.map((c) => c.meal.mealName),
     [components]
   );
-  const { combo, generating } = useMealCombo({
+  const { combo, generating, regenerate } = useMealCombo({
     mealIds,
     titles,
     category,
     enabled: true,
-    autoGenerate: true,
+    // On-demand only: don't auto-bill on render. Existing combos still load
+    // from the Firestore cache; tap the thumbnail to generate a new one.
+    autoGenerate: false,
   });
   const name = combo?.name || `${titles[0]} +${titles.length - 1}`;
 
@@ -1461,6 +1481,20 @@ function MobileUnifiedMealCard({
           />
         ) : (
           <ComboThumbStack components={components} generating={generating} />
+        )}
+        {!combo?.imageURL && !generating && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void regenerate();
+            }}
+            className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/45 transition-colors"
+            aria-label="Generate combined photo"
+            title="Generate combined photo"
+          >
+            <Sparkles className="h-4 w-4 text-white" />
+          </button>
         )}
       </div>
       <div className="flex-1 min-w-0">
@@ -1495,7 +1529,10 @@ function ComboExpandHeader({
     titles,
     category,
     enabled: true,
-    autoGenerate: true,
+    // On-demand only: don't auto-bill Imagen on render. Existing combos still
+    // load from the Firestore cache; new ones are generated via the expand
+    // sheet's "Generate photo" button (ComboExpandHeader).
+    autoGenerate: false,
   });
   const name = combo?.name || `${titles[0]} +${titles.length - 1}`;
 

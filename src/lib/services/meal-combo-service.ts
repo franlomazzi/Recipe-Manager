@@ -11,12 +11,12 @@ import {
   type MealCombo,
 } from "@/lib/firebase/meal-combos";
 
-function base64ToJpegFile(b64: string, name: string): File {
+function base64ToImageFile(b64: string, name: string, mimeType: string): File {
   const clean = b64.replace(/\s/g, "");
   const bytes = atob(clean);
   const arr = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-  return new File([arr], name, { type: "image/jpeg" });
+  return new File([arr], name, { type: mimeType });
 }
 
 export async function generateMealCombo(
@@ -53,8 +53,14 @@ export async function generateMealCombo(
     throw new Error(message);
   }
 
-  const data = (await res.json()) as { name: string; image: string };
-  const file = base64ToJpegFile(data.image, "combo.jpg");
+  const data = (await res.json()) as {
+    name: string;
+    image: string;
+    mimeType?: string;
+  };
+  const mime = data.mimeType ?? "image/png";
+  const ext = mime === "image/jpeg" ? "jpg" : "png";
+  const file = base64ToImageFile(data.image, `combo.${ext}`, mime);
   // Re-use the recipe image uploader; a "combo_" prefix keeps the path distinct.
   const { url, path } = await uploadRecipeImage(
     uid,

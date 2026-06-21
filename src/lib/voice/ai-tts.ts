@@ -11,6 +11,7 @@
 // workflows can't be left hanging on a flaky network.
 
 import { getAuth } from "@/lib/firebase/config";
+import { VOICE_ENABLED } from "./config";
 import { cancelSpeech, speak as speakBrowser } from "./tts";
 
 let currentAudio: HTMLAudioElement | null = null;
@@ -66,6 +67,10 @@ export async function speakWithAI(
   opts: AITTSOptions = {}
 ): Promise<void> {
   if (!text || !text.trim()) return;
+  // Voice globally disabled — never hit the paid Gemini TTS route. Returning
+  // here (rather than falling back to browser TTS) keeps cooking mode silent
+  // while voice is off; flip VOICE_ENABLED to restore both.
+  if (!VOICE_ENABLED) return;
   cancelAITTS();
 
   const fallback = opts.fallback !== false;

@@ -10,6 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { VOICE_ENABLED } from "@/lib/voice/config";
 import type { UseVoiceControlReturn } from "@/lib/voice/use-voice-control";
 
 interface VoiceControlProps {
@@ -64,6 +65,12 @@ export function VoiceControl({ voice }: VoiceControlProps) {
     ? lastTranscript
     : "";
   const captionKind: "interim" | "final" = interimTranscript ? "interim" : "final";
+
+  // Voice is globally disabled — hide the mic entirely. The recognizer only
+  // ever starts from this button's gesture, so hiding it fully disables input.
+  if (!VOICE_ENABLED) {
+    return null;
+  }
 
   if (!support.stt && !enabled) {
     return null;

@@ -52,8 +52,8 @@ export async function generateRecipeImage(
     throw new Error(message);
   }
 
-  const data = await response.json();
-  const base64Image: string | undefined = data?.predictions?.[0]?.bytesBase64Encoded;
+  const data = (await response.json()) as { image?: string; mimeType?: string };
+  const base64Image = data?.image;
   if (!base64Image) {
     throw new Error("Gemini returned no image data");
   }
@@ -66,5 +66,7 @@ export async function generateRecipeImage(
     byteNumbers[i] = byteCharacters.charCodeAt(i);
   }
   const byteArray = new Uint8Array(byteNumbers);
-  return new Blob([byteArray], { type: "image/jpeg" });
+  // gemini-2.5-flash-image returns PNG; honor the reported mime so the upload
+  // stores the correct content-type.
+  return new Blob([byteArray], { type: data?.mimeType ?? "image/png" });
 }

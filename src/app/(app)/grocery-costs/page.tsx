@@ -16,6 +16,7 @@ import {
   perUnit,
   swapSavings,
 } from "@/lib/utils/grocery-cost";
+import { buildGroceryCsv } from "@/lib/utils/grocery-csv";
 import type { LibraryIngredient, PriceEntry } from "@/lib/types/recipe";
 import {
   Dialog,
@@ -31,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   ArrowLeft,
   Check,
+  Download,
   PiggyBank,
   Plus,
   Search,
@@ -256,6 +258,33 @@ export default function GroceryCostsPage() {
   );
   const resultCount = groups.reduce((n, g) => n + g.items.length, 0);
 
+  function handleExport() {
+    if (items.length === 0) {
+      toast.error("Nothing to export yet");
+      return;
+    }
+    const csv = buildGroceryCsv(items, {
+      locationLabel: locationName,
+      categoryLabel: (item) =>
+        (item.shoppingCategoryId &&
+          categoryNameById.get(item.shoppingCategoryId)) ||
+        "",
+    });
+    // Prepend a UTF-8 BOM so Excel reads accented characters correctly.
+    const blob = new Blob(["﻿" + csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `grocery-costs-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${items.length} ingredients`);
+  }
+
   if (!user) return null;
 
   function renderRow(item: LibraryIngredient) {
@@ -303,20 +332,30 @@ export default function GroceryCostsPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          aria-label="Back to settings"
-          render={<Link href="/settings" />}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <PiggyBank className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-bold tracking-tight">Grocery Costs</h1>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label="Back to settings"
+            render={<Link href="/settings" />}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <PiggyBank className="h-6 w-6 text-primary" />
+            <h1 className="text-2xl font-bold tracking-tight">Grocery Costs</h1>
+          </div>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExport}
+          disabled={items.length === 0}
+        >
+          <Download className="h-4 w-4 mr-1" /> Export
+        </Button>
       </div>
 
       <p className="text-sm text-muted-foreground">
