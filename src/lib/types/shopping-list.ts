@@ -77,8 +77,17 @@ export interface ShoppingListState {
   checkedKeysByWeek?: Record<string, string[]>;
   /** Manually-added recipes per week: key = weekIndex as string */
   extraByWeek: Record<string, ExtraRecipeEntry[]>;
-  /** Free-text items the user typed in manually */
-  customItems: CustomShoppingItem[];
+  /**
+   * @deprecated Legacy global custom items (not week-scoped), which leaked across
+   * every week. Migrated on load into `customItemsByWeek` under the current ISO
+   * week, then cleared. Reads should use `customItemsByWeek` instead.
+   */
+  customItems?: CustomShoppingItem[];
+  /**
+   * Free-text items the user typed in manually, per ISO week. Each week keeps its
+   * own list so custom items (and their checked state) don't bleed across weeks.
+   */
+  customItemsByWeek?: Record<string, CustomShoppingItem[]>;
   /**
    * One-off metadata overrides for non-linked items, per-week.
    * Outer key = weekIndex as string, inner key = item key (name|unit) or custom item id.

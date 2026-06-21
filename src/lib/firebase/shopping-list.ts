@@ -125,9 +125,32 @@ export async function removeExtraEntry(
 
 export async function updateCustomItems(
   userId: string,
+  weekKey: string,
   customItems: CustomShoppingItem[]
 ) {
-  await patchOrCreate(userId, { customItems });
+  await patchOrCreate(userId, { [`customItemsByWeek.${weekKey}`]: customItems });
+}
+
+/**
+ * One-time migration: move the legacy global `customItems` array into the
+ * per-week `customItemsByWeek` map under the current ISO week, then clear the
+ * legacy field. Without a week association the only reasonable home is the week
+ * the user is shopping now. Safe to call repeatedly (no-op once cleared).
+ */
+export async function migrateGlobalCustomItems(
+  userId: string,
+  currentWeekKey: string,
+  state: ShoppingListState
+) {
+  const legacy = state.customItems ?? [];
+  if (legacy.length === 0) return;
+  // Merge into anything already recorded for the current week.
+  const existing = state.customItemsByWeek?.[currentWeekKey] ?? [];
+  const merged = [...existing, ...legacy];
+  await patchOrCreate(userId, {
+    [`customItemsByWeek.${currentWeekKey}`]: merged,
+    customItems: [],
+  });
 }
 
 /**

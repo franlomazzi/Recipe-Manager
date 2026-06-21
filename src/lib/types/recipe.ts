@@ -182,6 +182,34 @@ export interface CookLog {
 
 // Shared ingredient library item (from nutrition_ingredients collection)
 // Matches the food tracking app's FoodItem interface
+/**
+ * A single recorded price for an ingredient at a particular location, used by
+ * the Grocery Costs screen to compare stores and swap to the cheapest. All
+ * quantities are expressed in the ingredient's `servingUnit` so prices are
+ * directly comparable per-unit without conversion.
+ */
+export interface PriceEntry {
+  id: string;
+  /** Saved shopping location id, or null for a free-text / unspecified place. */
+  locationId: string | null;
+  /** Display label — falls back to this when `locationId` is null or unknown. */
+  locationName: string;
+  /** Amount paid. */
+  price: number;
+  /** Quantity bought for `price`, in the ingredient's `servingUnit`. */
+  qty: number;
+  /**
+   * Optional minimum quantity (in `servingUnit`) you must buy to unlock this
+   * price — e.g. a bulk discount that only applies from 5kg up. Null/undefined
+   * means no minimum.
+   */
+  minQty?: number | null;
+  /** Snapshot of the unit at entry time (the ingredient's `servingUnit`). */
+  unit: string;
+  /** When this price was recorded (ms epoch). */
+  addedAt?: number;
+}
+
 export interface LibraryIngredient {
   id: string;
   userId?: string;
@@ -212,6 +240,15 @@ export interface LibraryIngredient {
   shoppingPrice?: number | null;
   /** Quantity purchased for `shoppingPrice`, in `servingUnit`. Used to compute proportional cost per recipe. */
   shoppingPriceQty?: number | null;
+  /**
+   * Recorded prices at different locations for cost comparison on the Grocery
+   * Costs screen. The "active" entry is mirrored into `shoppingPrice` /
+   * `shoppingPriceQty` / `shoppingLocationId`, which is what drives shopping-list
+   * cost estimates. Recipe-Manager-only; ignored by the food tracking app.
+   */
+  priceEntries?: PriceEntry[];
+  /** Id of the `priceEntries` entry currently mirrored into the active shopping price. */
+  activePriceEntryId?: string | null;
   /** Whether this ingredient is part of the user's recurring pantry checklist */
   isPantryItem?: boolean;
   /**

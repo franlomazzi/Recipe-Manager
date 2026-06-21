@@ -473,6 +473,7 @@ export default function ShoppingListPage() {
     const customItem = customItems.find((i) => i.id === itemId);
     await updateCustomItems(
       user.uid,
+      weekKey,
       customItems.map((i) =>
         i.id === itemId ? { ...i, checked: !i.checked } : i
       )
@@ -510,7 +511,7 @@ export default function ShoppingListPage() {
       name: customInput.trim(),
       checked: false,
     };
-    await updateCustomItems(user.uid, [...customItems, item]);
+    await updateCustomItems(user.uid, weekKey, [...customItems, item]);
     setCustomInput("");
   }
 
@@ -518,6 +519,7 @@ export default function ShoppingListPage() {
     if (!user) return;
     await updateCustomItems(
       user.uid,
+      weekKey,
       customItems.filter((i) => i.id !== itemId)
     );
   }
@@ -528,6 +530,7 @@ export default function ShoppingListPage() {
     if (customItems.some((i) => i.checked)) {
       await updateCustomItems(
         user.uid,
+        weekKey,
         customItems.map((i) => ({ ...i, checked: false }))
       );
     }
@@ -794,7 +797,7 @@ export default function ShoppingListPage() {
     if (resetScope === "everything") {
       await clearAllChecked(user.uid, weekKey);
       if (customItems.some((i) => i.checked)) {
-        await updateCustomItems(user.uid, customItems.map((i) => ({ ...i, checked: false })));
+        await updateCustomItems(user.uid, weekKey, customItems.map((i) => ({ ...i, checked: false })));
       }
     }
     toast.success("Week reset");

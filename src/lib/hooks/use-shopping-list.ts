@@ -9,6 +9,7 @@ import {
   subscribeToShoppingListState,
   migrateWeekKey,
   migrateGlobalCheckedKeys,
+  migrateGlobalCustomItems,
 } from "@/lib/firebase/shopping-list";
 import {
   migratePantryWeekKey,
@@ -41,7 +42,7 @@ function itemKey(name: string): string {
  * weekOffset=0 is the Monday of the week containing planStart.
  * Days outside the plan range are skipped.
  */
-function recipeOccurrencesForCalendarWeek(
+export function recipeOccurrencesForCalendarWeek(
   instance: PlanInstance,
   weekOffset: number,
   recipeServings: Map<string, number>
@@ -92,7 +93,7 @@ interface AggregateContext {
  * Aggregate ingredients into ShoppingItems, enriching each with library metadata
  * (location, section, category) when linked, or with one-off overrides if free-text.
  */
-function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
+export function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
   const {
     planOccurrences,
     extras,
@@ -315,6 +316,53 @@ function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
   });
 }
 
+const EMPTY_STRING_SET: Set<string> = new Set();
+const EMPTY_PROVENANCE: Map<string, ProvenanceStamp | null> = new Map();
+
+/**
+ * Consumption cost of the meal-plan-driven groceries for one calendar week of a
+ * plan instance: the sum of each recipe ingredient's *proportional* cost
+ * (`quantity needed ÷ priceQty × price`). Because it's proportional to what the
+ * week's recipes actually use, a bulk purchase never spikes a single week — this
+ * is the building block for a smoothed weekly average.
+ *
+ * Pantry stock-ups are excluded (they aren't tied to a recipe quantity). Items
+ * without a recorded price contribute 0, so the figure covers only priced
+ * ingredients.
+ */
+export function weeklyConsumptionCost(
+  instance: PlanInstance,
+  weekOffset: number,
+  recipesMap: Map<string, Recipe>,
+  libraryMap: Map<string, LibraryIngredient>,
+  recipeServings: Map<string, number>,
+  extras: ExtraRecipeEntry[] = []
+): { total: number; mealCount: number } {
+  const planOccurrences = recipeOccurrencesForCalendarWeek(
+    instance,
+    weekOffset,
+    recipeServings
+  );
+  const items = aggregateIngredients({
+    planOccurrences,
+    extras,
+    pantryAddedIds: [],
+    individualPantryAddedIds: [],
+    recipesMap,
+    libraryMap,
+    checkedKeys: EMPTY_STRING_SET,
+    pantryCheckedKeys: EMPTY_STRING_SET,
+    oneOffForWeek: {},
+    exclusions: EMPTY_STRING_SET,
+    pantryRemovedProvenance: EMPTY_PROVENANCE,
+  });
+  const total = items.reduce(
+    (sum, it) => sum + (it.fromPantry ? 0 : it.cost ?? 0),
+    0
+  );
+  return { total, mealCount: planOccurrences.size + extras.length };
+}
+
 export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstance | null) {
   const { user } = useAuth();
   const { recipes } = useRecipes();
@@ -520,6 +568,16 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     void migrateGlobalCheckedKeys(user.uid, currentWeekKey, state);
   }, [user, state]);
 
+  // Best-effort one-time migration: the legacy global `customItems` array wasn't
+  // week-scoped, so free-text items (and their checked state) leaked across every
+  // week. Move them into the current real ISO week and clear the global field.
+  useEffect(() => {
+    if (!user || !state) return;
+    if (!state.customItems || state.customItems.length === 0) return;
+    const currentWeekKey = isoWeekKey(parseISO(shoppingCurrentMonday()));
+    void migrateGlobalCustomItems(user.uid, currentWeekKey, state);
+  }, [user, state]);
+
   // Best-effort one-time migration: if legacy numeric-offset data exists for
   // this week, copy it to the new ISO-week key and delete the legacy entry.
   useEffect(() => {
@@ -577,8 +635,8 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
   );
 
   const customItems: CustomShoppingItem[] = useMemo(
-    () => state?.customItems ?? [],
-    [state]
+    () => state?.customItemsByWeek?.[weekKey] ?? [],
+    [state, weekKey]
   );
 
   const availableRecipes = useMemo(
