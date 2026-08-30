@@ -80,6 +80,8 @@ export async function updateRecipe(
     mapped.forkedFromVersion = data.forkedFromVersion;
   if (data.rating !== undefined) mapped.rating = data.rating;
   if (data.cookCount !== undefined) mapped.cookCount = data.cookCount;
+  if (data.hiddenFromList !== undefined)
+    mapped.hiddenFromList = data.hiddenFromList;
 
   // If ingredients are provided, convert to Firestore format + rebuild extensions
   if (data.ingredients !== undefined) {
@@ -121,6 +123,21 @@ export async function setRecipeShared(
 ): Promise<void> {
   await updateDoc(doc(getDb(), COLLECTION, recipeId), {
     householdShared: shared,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Hide/unhide a recipe from the recipe library list. Hidden recipes are still
+ * fully usable everywhere else (meal plan, shopping list, direct link) — this
+ * only affects the default view on /recipes.
+ */
+export async function setRecipeHiddenFromList(
+  recipeId: string,
+  hidden: boolean
+): Promise<void> {
+  await updateDoc(doc(getDb(), COLLECTION, recipeId), {
+    hiddenFromList: hidden,
     updatedAt: serverTimestamp(),
   });
 }

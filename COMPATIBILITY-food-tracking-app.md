@@ -61,7 +61,10 @@ Firestore reads ignore unknown fields and the food app filters plans by status:
    active plan.
 2. **`user_preferences/{uid}_meal_plan`** (`multiRecipePerMeal`,
    `forceShowCategories`) — Recipe-Manager-only doc.
-3. **`recipe_meal_combos`** — Recipe-Manager-only collection caching the AI
+3. **`hiddenFromList: boolean`** on `nutrition_meals` docs. Keeps a recipe out
+   of Recipe Manager's recipe library list only; the meal itself, its macros
+   and its use in plans are untouched, so the food app is unaffected.
+4. **`recipe_meal_combos`** — Recipe-Manager-only collection caching the AI
    "combined plate" photo + name for a set of recipes (see the combined-photo
    feature). The food app never reads it.
 

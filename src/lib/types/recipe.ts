@@ -137,6 +137,11 @@ export interface Recipe {
   // Whether this recipe is shared with the household partner. Only the creator
   // (userId) can edit/delete; partner can view, log cooks, and fork.
   householdShared?: boolean;
+  // Hidden from the recipe library list (the browse/cook entry point). The
+  // recipe still exists everywhere else — meal plan pickers, planned meals,
+  // shopping lists — it just doesn't clutter the library. The "Hidden recipes"
+  // filter on /recipes can bring them back into view.
+  hiddenFromList?: boolean;
   // Ingredient extensions (category/note) keyed by ingredient id/foodId
   ingredientExtensions: Record<string, IngredientExtension>;
   // Origin URL when this recipe was imported from a website, video, etc.

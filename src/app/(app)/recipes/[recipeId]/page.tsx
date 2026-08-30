@@ -6,6 +6,7 @@ import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useHousehold } from "@/lib/contexts/household-context";
 import { ShareRecipeToggle } from "@/components/recipe/share-recipe-toggle";
+import { HideRecipeToggle } from "@/components/recipe/hide-recipe-toggle";
 import {
   deleteRecipe,
   updateRecipe,
@@ -412,6 +413,11 @@ export default function RecipeDetailPage() {
           recipeId={recipe.id}
           shared={!!recipe.householdShared}
           visible={isMine && !!partnerUid}
+        />
+        <HideRecipeToggle
+          recipeId={recipe.id}
+          hidden={!!recipe.hiddenFromList}
+          visible={isMine}
         />
         {isMine && (
           <Button variant="outline" size="sm" className="rounded-xl" render={<Link href={`/recipes/${recipe.id}/edit`} />}>

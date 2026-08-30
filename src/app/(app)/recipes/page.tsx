@@ -28,6 +28,7 @@ import {
   Users,
   SlidersHorizontal,
   ArrowUpDown,
+  EyeOff,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -76,12 +77,26 @@ const SOURCE_OPTIONS = [
 
 type SourceFilter = (typeof SOURCE_OPTIONS)[number]["value"];
 
+/**
+ * Recipes flagged `hiddenFromList` stay out of the library by default. They're
+ * still fully available in the meal plan picker and everywhere else — this
+ * filter just decides whether the library shows them too.
+ */
+const HIDDEN_OPTIONS = [
+  { label: "Hide", value: "exclude" as const },
+  { label: "Show", value: "include" as const },
+  { label: "Only", value: "only" as const },
+];
+
+type HiddenFilter = (typeof HIDDEN_OPTIONS)[number]["value"];
+
 interface FilterState {
   difficulties: Set<Difficulty>;
   categories: Set<string>;
   maxTime: number | null;
   minRating: number | null;
   source: SourceFilter;
+  hidden: HiddenFilter;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -90,6 +105,7 @@ const DEFAULT_FILTERS: FilterState = {
   maxTime: null,
   minRating: null,
   source: "all",
+  hidden: "exclude",
 };
 
 const PREFS_KEY = "recipes:list-prefs:v1";
@@ -100,6 +116,7 @@ interface StoredPrefs {
   maxTime?: number | null;
   minRating?: number | null;
   source?: SourceFilter;
+  hidden?: HiddenFilter;
   sort?: SortKey;
   favoritesOnly?: boolean;
   view?: "grid" | "list";
@@ -139,6 +156,8 @@ function applyFilters(
 ): Recipe[] {
   const q = search.toLowerCase().trim();
   return recipes.filter((r) => {
+    if (filters.hidden === "exclude" && r.hiddenFromList) return false;
+    if (filters.hidden === "only" && !r.hiddenFromList) return false;
     if (q) {
       const inTitle = r.title.toLowerCase().includes(q);
       const inCats = r.categories.some((c) => c.toLowerCase().includes(q));
@@ -198,7 +217,8 @@ function activeFilterCount(f: FilterState): number {
     f.categories.size +
     (f.maxTime != null ? 1 : 0) +
     (f.minRating != null ? 1 : 0) +
-    (f.source !== "all" ? 1 : 0)
+    (f.source !== "all" ? 1 : 0) +
+    (f.hidden !== "exclude" ? 1 : 0)
   );
 }
 
@@ -325,6 +345,24 @@ function FilterPanel({
         </div>
       </div>
 
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
+          Hidden recipes
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {HIDDEN_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setFilters({ ...filters, hidden: opt.value })}
+              className={`${chipBase} ${filters.hidden === opt.value ? chipOn : chipOff}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {availableCategories.length > 0 && (
         <div>
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
@@ -368,6 +406,7 @@ export default function RecipesPage() {
         maxTime: p.maxTime ?? null,
         minRating: p.minRating ?? null,
         source: p.source ?? "all",
+        hidden: p.hidden ?? "exclude",
       });
       if (p.sort) setSort(p.sort);
       if (typeof p.favoritesOnly === "boolean") setFavoritesOnly(p.favoritesOnly);
@@ -384,6 +423,7 @@ export default function RecipesPage() {
       maxTime: filters.maxTime,
       minRating: filters.minRating,
       source: filters.source,
+      hidden: filters.hidden,
       sort,
       favoritesOnly,
       view,
@@ -589,6 +629,9 @@ export default function RecipesPage() {
                   <div className="flex items-start justify-between gap-1">
                     <h3 className="font-semibold text-xs line-clamp-1">{recipe.title}</h3>
                     <div className="flex items-center gap-1 shrink-0">
+                      {recipe.hiddenFromList && (
+                        <EyeOff className="h-3 w-3 text-muted-foreground" aria-label="Hidden from recipe list" />
+                      )}
                       {recipe.userId !== user?.uid && (
                         <Users className="h-3 w-3 text-muted-foreground" aria-label="Shared with you" />
                       )}
@@ -833,6 +876,9 @@ function KitchenToolRecipes({
                     {r.title}
                   </h3>
                   <div className="flex items-center gap-1.5 shrink-0 mt-1">
+                    {r.hiddenFromList && (
+                      <EyeOff className="h-3.5 w-3.5 text-muted-foreground" aria-label="Hidden from recipe list" />
+                    )}
                     {r.userId !== uid && (
                       <Users className="h-3.5 w-3.5 text-muted-foreground" aria-label="Shared with you" />
                     )}
@@ -881,6 +927,7 @@ function KitchenToolRecipes({
             >
               <div className="flex items-center gap-3 min-w-0">
                 {r.isFavorite && <Heart className="h-3 w-3 shrink-0 fill-primary text-primary" />}
+                {r.hiddenFromList && <EyeOff className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Hidden from recipe list" />}
                 {r.userId !== uid && <Users className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Shared with you" />}
                 <span className="kt-serif text-base font-medium truncate">{r.title}</span>
               </div>

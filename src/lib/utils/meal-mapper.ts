@@ -90,6 +90,7 @@ export function firestoreDocToRecipe(
     cookCount: (data.cookCount as number) ?? 0,
     averageDuration: (data.averageDuration as number) ?? null,
     householdShared: (data.householdShared as boolean) ?? false,
+    hiddenFromList: (data.hiddenFromList as boolean) ?? false,
     ingredientExtensions: extensions,
     sourceUrl: (data.sourceUrl as string) ?? null,
     createdAt: data.createdAt as Recipe["createdAt"],
@@ -177,6 +178,8 @@ export function recipeToFirestoreDoc(
     forkedFromVersion: recipe.forkedFromVersion ?? null,
     rating: recipe.rating ?? null,
     cookCount: recipe.cookCount ?? 0,
+    // Recipe-Manager-only; the food tracking app ignores it.
+    hiddenFromList: recipe.hiddenFromList ?? false,
     ingredientExtensions,
     // Only include sourceUrl when present — Firestore rejects undefined.
     ...(recipe.sourceUrl ? { sourceUrl: recipe.sourceUrl } : {}),
