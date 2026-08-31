@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useRecipe } from "@/lib/hooks/use-recipe";
+import { useRecipes } from "@/lib/hooks/use-recipes";
 import { useKitchenTool } from "@/lib/hooks/use-kitchen-tool";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useHousehold } from "@/lib/contexts/household-context";
@@ -85,6 +86,7 @@ export default function RecipeDetailPage() {
   const router = useRouter();
   const recipeId = params.recipeId as string;
   const { recipe, loading } = useRecipe(recipeId);
+  const { isRecipeHidden } = useRecipes();
   const isKT = useKitchenTool();
   const { user } = useAuth();
   const { partnerUid, partnerName } = useHousehold();
@@ -416,8 +418,9 @@ export default function RecipeDetailPage() {
         />
         <HideRecipeToggle
           recipeId={recipe.id}
-          hidden={!!recipe.hiddenFromList}
-          visible={isMine}
+          hidden={isRecipeHidden(recipe)}
+          isOwner={isMine}
+          lockedByOwner={!isMine && !!recipe.hiddenFromList}
         />
         {isMine && (
           <Button variant="outline" size="sm" className="rounded-xl" render={<Link href={`/recipes/${recipe.id}/edit`} />}>

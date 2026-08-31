@@ -85,6 +85,8 @@ interface AggregateContext {
   pantryCheckedKeys: Set<string>;
   oneOffForWeek: Record<string, OneOffMeta>;
   exclusions: Set<string>;
+  /** Item keys the user has hidden from the shopping list permanently (all weeks). */
+  hiddenKeys: Set<string>;
   /** Per-libraryId tombstone for shared pantry items soft-removed this week. */
   pantryRemovedProvenance: Map<string, ProvenanceStamp | null>;
 }
@@ -105,6 +107,7 @@ export function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     pantryCheckedKeys,
     oneOffForWeek,
     exclusions,
+    hiddenKeys,
     pantryRemovedProvenance,
   } = ctx;
 
@@ -225,7 +228,7 @@ export function aggregateIngredients(ctx: AggregateContext): ShoppingItem[] {
     addPantryItem(id, false);
   }
 
-  return Array.from(merged.entries()).filter(([key]) => !exclusions.has(key)).map(([key, val]) => {
+  return Array.from(merged.entries()).filter(([key]) => !exclusions.has(key) && !hiddenKeys.has(key)).map(([key, val]) => {
     // Resolve metadata: prefer linked library item, fall back to one-off override
     const lib = val.linkedLibraryItem;
     const oneOff = oneOffForWeek[key];
@@ -354,6 +357,7 @@ export function weeklyConsumptionCost(
     pantryCheckedKeys: EMPTY_STRING_SET,
     oneOffForWeek: {},
     exclusions: EMPTY_STRING_SET,
+    hiddenKeys: EMPTY_STRING_SET,
     pantryRemovedProvenance: EMPTY_PROVENANCE,
   });
   const total = items.reduce(
@@ -517,6 +521,13 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     [exclusionsByWeek, weekKey]
   );
 
+  // Permanently hidden items — not week-scoped, they never show on any week.
+  const hiddenItems = useMemo(() => state?.hiddenItems ?? [], [state]);
+  const hiddenKeys = useMemo(
+    () => new Set(hiddenItems.map((h) => h.key)),
+    [hiddenItems]
+  );
+
   // Soft-delete tombstones for shared pantry items this week.
   const pantryRemovedRawForWeek = useMemo(
     () =>
@@ -617,6 +628,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
         pantryCheckedKeys: sharedPantryCheckedKeys,
         oneOffForWeek,
         exclusions,
+        hiddenKeys,
         pantryRemovedProvenance,
       }),
     [
@@ -630,6 +642,7 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
       sharedPantryCheckedKeys,
       oneOffForWeek,
       exclusions,
+      hiddenKeys,
       pantryRemovedProvenance,
     ]
   );
@@ -698,6 +711,8 @@ export function useShoppingList(weekIndex: number = 0, planInstance?: PlanInstan
     individualPantryProcessed,
     exclusionsByWeek,
     exclusions,
+    hiddenItems,
+    hiddenKeys,
     closedWeeks: state?.closedWeeks ?? [],
     loading,
     hasActivePlan: !!planInstance,

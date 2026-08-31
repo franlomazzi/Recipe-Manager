@@ -14,6 +14,7 @@ import type {
   ShoppingListState,
   CustomShoppingItem,
   ExtraRecipeEntry,
+  HiddenShoppingItem,
 } from "@/lib/types/shopping-list";
 import type { OneOffMeta } from "@/lib/types/shopping-organization";
 
@@ -307,6 +308,33 @@ export async function excludeItemForWeek(
   await patchOrCreate(userId, {
     [`exclusionsByWeek.${weekKey}`]: [...currentExclusions, itemKey],
   });
+}
+
+/**
+ * Permanently hide an item from the shopping list (every week). Used for
+ * "ingredients" that aren't groceries at all, e.g. a "Saturday Cheat Meal"
+ * placeholder. The whole array is rewritten rather than patched with
+ * `arrayUnion` because item keys are free-text and can contain dots, which
+ * Firestore would read as field-path separators.
+ */
+export async function hideShoppingItem(
+  userId: string,
+  current: HiddenShoppingItem[],
+  item: HiddenShoppingItem
+): Promise<void> {
+  if (current.some((h) => h.key === item.key)) return;
+  await patchOrCreate(userId, { hiddenItems: [...current, item] });
+}
+
+/** Unhide a previously hidden item so it returns to the shopping list. */
+export async function unhideShoppingItem(
+  userId: string,
+  current: HiddenShoppingItem[],
+  key: string
+): Promise<void> {
+  const next = current.filter((h) => h.key !== key);
+  if (next.length === current.length) return;
+  await patchOrCreate(userId, { hiddenItems: next });
 }
 
 export async function removeIndividualPantryItemFromWeek(

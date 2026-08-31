@@ -4,12 +4,24 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { setRecipeHiddenFromList } from "@/lib/firebase/firestore";
+import { setRecipeHiddenForUser } from "@/lib/firebase/user-recipe-prefs";
+import { useAuth } from "@/lib/contexts/auth-context";
 import { toast } from "sonner";
 
 interface HideRecipeToggleProps {
   recipeId: string;
   hidden: boolean;
-  /** When false, the toggle is hidden (e.g. someone else's recipe). */
+  /**
+   * Whether the signed-in user created this recipe. Owners write the flag on
+   * the recipe itself; everyone else hides it only from their own library.
+   */
+  isOwner: boolean;
+  /**
+   * Set when a partner's recipe is already hidden by its creator — nothing this
+   * user toggles can bring it back, so the button is shown but inert.
+   */
+  lockedByOwner?: boolean;
+  /** When false, the toggle is not rendered. */
   visible?: boolean;
 }
 
@@ -21,16 +33,24 @@ interface HideRecipeToggleProps {
 export function HideRecipeToggle({
   recipeId,
   hidden,
+  isOwner,
+  lockedByOwner = false,
   visible = true,
 }: HideRecipeToggleProps) {
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
 
   if (!visible) return null;
 
   async function toggle() {
+    if (!isOwner && !user) return;
     setBusy(true);
     try {
-      await setRecipeHiddenFromList(recipeId, !hidden);
+      if (isOwner) {
+        await setRecipeHiddenFromList(recipeId, !hidden);
+      } else {
+        await setRecipeHiddenForUser(user!.uid, recipeId, !hidden);
+      }
       toast.success(hidden ? "Shown in recipe list" : "Hidden from recipe list");
     } catch {
       toast.error("Failed to update visibility");
@@ -39,18 +59,22 @@ export function HideRecipeToggle({
     }
   }
 
+  const title = lockedByOwner
+    ? "Hidden by whoever shared this recipe"
+    : hidden
+      ? "Show again in your recipe list"
+      : isOwner
+        ? "Hide from the recipe list (stays available in meal plans)"
+        : "Hide from your recipe list (stays available in meal plans)";
+
   return (
     <Button
       variant={hidden ? "default" : "outline"}
       size="sm"
       className="rounded-xl"
       onClick={toggle}
-      disabled={busy}
-      title={
-        hidden
-          ? "Show again in the recipe list"
-          : "Hide from the recipe list (stays available in meal plans)"
-      }
+      disabled={busy || lockedByOwner}
+      title={title}
     >
       {busy ? (
         <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />

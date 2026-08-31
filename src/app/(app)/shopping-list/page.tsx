@@ -42,6 +42,8 @@ import {
   reopenIndividualPantryForWeek,
   removeIndividualPantryItemFromWeek,
   excludeItemForWeek,
+  hideShoppingItem,
+  unhideShoppingItem,
   undoLastIndividualPantryCommit,
 } from "@/lib/firebase/shopping-list";
 import { usePantryItems, type PantryScope, type PantryItem } from "@/lib/hooks/use-pantry-items";
@@ -97,6 +99,7 @@ import {
   Wallet,
   CheckCheck,
   Lock,
+  EyeOff,
 } from "lucide-react";
 import {
   DndContext,
@@ -236,6 +239,7 @@ export default function ShoppingListPage() {
     individualPantryCheckedIds,
     individualPantryProcessed,
     exclusionsByWeek,
+    hiddenItems,
     closedWeeks,
     loading,
     hasActivePlan,
@@ -645,6 +649,28 @@ export default function ShoppingListPage() {
     }
     setAssigning(null);
     toast.success("Removed from shopping list");
+  }
+
+  /**
+   * Hide an item from the shopping list for good (every week), for entries that
+   * aren't really groceries — e.g. a "Saturday Cheat Meal" placeholder. Reversible
+   * from the toast, or later from Settings → Hidden Shopping Items.
+   */
+  async function handleHideItem(item: ShoppingItem) {
+    if (!user) return;
+    const current = hiddenItems;
+    await hideShoppingItem(user.uid, current, { key: item.key, name: item.name });
+    setAssigning(null);
+    toast(`${item.name} hidden from your shopping list`, {
+      description: "Manage hidden items in Settings.",
+      action: {
+        label: "Undo",
+        onClick: () => {
+          void unhideShoppingItem(user.uid, [...current, { key: item.key, name: item.name }], item.key);
+        },
+      },
+      duration: 6000,
+    });
   }
 
   async function handleRestoreFromShoppingList(item: ShoppingItem) {
@@ -2303,6 +2329,11 @@ export default function ShoppingListPage() {
         onClose={() => setAssigning(null)}
         onSave={saveAssignment}
         onRemove={assigning ? () => handleRemoveFromShoppingList(assigning) : undefined}
+        onHide={
+          assigning && !assigning.fromPantry
+            ? () => handleHideItem(assigning)
+            : undefined
+        }
         locations={locations}
         categories={categories}
         locationMap={locationMap}
@@ -2590,6 +2621,7 @@ function AssignDialog<T extends AssignDialogItem>({
   onClose,
   onSave,
   onRemove,
+  onHide,
   locations,
   categories,
   locationMap,
@@ -2609,6 +2641,11 @@ function AssignDialog<T extends AssignDialogItem>({
     }
   ) => Promise<void>;
   onRemove?: () => Promise<void>;
+  /**
+   * Permanently hide this item from the shopping list (every week). Offered as a
+   * checkbox in the dialog; applied when the user saves.
+   */
+  onHide?: () => Promise<void>;
   locations: import("@/lib/types/shopping-organization").ShoppingLocation[];
   categories: import("@/lib/types/shopping-organization").IngredientCategoryDef[];
   locationMap: Map<string, import("@/lib/types/shopping-organization").ShoppingLocation>;
@@ -2621,6 +2658,7 @@ function AssignDialog<T extends AssignDialogItem>({
   const [note, setNote] = useState("");
   const [priceInput, setPriceInput] = useState("");
   const [priceQtyInput, setPriceQtyInput] = useState("");
+  const [hide, setHide] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Reset on item change
@@ -2632,6 +2670,7 @@ function AssignDialog<T extends AssignDialogItem>({
       setNote(item.note ?? "");
       setPriceInput(item.price !== null ? String(item.price) : "");
       setPriceQtyInput(item.priceQty !== null ? String(item.priceQty) : "");
+      setHide(false);
     }
   }, [item]);
 
@@ -2641,6 +2680,12 @@ function AssignDialog<T extends AssignDialogItem>({
     if (!item) return;
     setSaving(true);
     try {
+      // Hiding wins over the metadata edits — the item is leaving the list, so
+      // there's nothing left to assign a location or price to.
+      if (hide && onHide) {
+        await onHide();
+        return;
+      }
       // If section doesn't belong to selected location, drop it
       const validSection =
         sectionId && sections.some((s) => s.id === sectionId) ? sectionId : null;
@@ -2827,6 +2872,27 @@ function AssignDialog<T extends AssignDialogItem>({
 
             {scopeSection}
 
+            {onHide && (
+              <div className="flex items-start gap-2.5 rounded-lg border px-3 py-2.5">
+                <Checkbox
+                  id="hide-from-list"
+                  checked={hide}
+                  onCheckedChange={(v) => setHide(v === true)}
+                  className="mt-0.5"
+                />
+                <label htmlFor="hide-from-list" className="cursor-pointer min-w-0">
+                  <span className="text-xs font-medium flex items-center gap-1.5">
+                    <EyeOff className="h-3.5 w-3.5" />
+                    Hide from shopping list
+                  </span>
+                  <span className="block text-[10px] text-muted-foreground mt-0.5">
+                    For entries that aren&apos;t really ingredients. Hides it from
+                    every week — undo any time in Settings → Hidden Shopping Items.
+                  </span>
+                </label>
+              </div>
+            )}
+
             <div className="flex items-center justify-between pt-2">
               {onRemove ? (
                 <Button
@@ -2848,7 +2914,7 @@ function AssignDialog<T extends AssignDialogItem>({
                 </Button>
                 <Button size="sm" onClick={handleSave} disabled={saving}>
                   {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                  Save
+                  {hide && onHide ? "Hide item" : "Save"}
                 </Button>
               </div>
             </div>

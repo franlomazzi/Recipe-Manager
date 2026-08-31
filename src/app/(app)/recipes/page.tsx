@@ -78,9 +78,11 @@ const SOURCE_OPTIONS = [
 type SourceFilter = (typeof SOURCE_OPTIONS)[number]["value"];
 
 /**
- * Recipes flagged `hiddenFromList` stay out of the library by default. They're
- * still fully available in the meal plan picker and everywhere else — this
- * filter just decides whether the library shows them too.
+ * Hidden recipes stay out of the library by default — either because their
+ * creator flagged `hiddenFromList`, or because this user hid them from their
+ * own list (the only option for a recipe a partner shared). They're still fully
+ * available in the meal plan picker and everywhere else — this filter just
+ * decides whether the library shows them too.
  */
 const HIDDEN_OPTIONS = [
   { label: "Hide", value: "exclude" as const },
@@ -153,11 +155,12 @@ function applyFilters(
   favoritesOnly: boolean,
   filters: FilterState,
   uid: string | undefined,
+  isRecipeHidden: (r: Recipe) => boolean,
 ): Recipe[] {
   const q = search.toLowerCase().trim();
   return recipes.filter((r) => {
-    if (filters.hidden === "exclude" && r.hiddenFromList) return false;
-    if (filters.hidden === "only" && !r.hiddenFromList) return false;
+    if (filters.hidden === "exclude" && isRecipeHidden(r)) return false;
+    if (filters.hidden === "only" && !isRecipeHidden(r)) return false;
     if (q) {
       const inTitle = r.title.toLowerCase().includes(q);
       const inCats = r.categories.some((c) => c.toLowerCase().includes(q));
@@ -387,7 +390,7 @@ function FilterPanel({
 }
 
 export default function RecipesPage() {
-  const { recipes } = useRecipes();
+  const { recipes, isRecipeHidden } = useRecipes();
   const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
@@ -437,8 +440,12 @@ export default function RecipesPage() {
   }, [recipes]);
 
   const filtered = useMemo(
-    () => applySort(applyFilters(recipes, search, favoritesOnly, filters, user?.uid), sort),
-    [recipes, search, favoritesOnly, filters, sort, user?.uid],
+    () =>
+      applySort(
+        applyFilters(recipes, search, favoritesOnly, filters, user?.uid, isRecipeHidden),
+        sort,
+      ),
+    [recipes, search, favoritesOnly, filters, sort, user?.uid, isRecipeHidden],
   );
 
   const filterCount = activeFilterCount(filters);
@@ -627,9 +634,14 @@ export default function RecipesPage() {
                 )}
                 <CardContent className="p-2.5">
                   <div className="flex items-start justify-between gap-1">
-                    <h3 className="font-semibold text-xs line-clamp-1">{recipe.title}</h3>
+                    <h3
+                      title={recipe.title}
+                      className="font-semibold text-xs leading-4 line-clamp-2 min-h-8 break-words"
+                    >
+                      {recipe.title}
+                    </h3>
                     <div className="flex items-center gap-1 shrink-0">
-                      {recipe.hiddenFromList && (
+                      {isRecipeHidden(recipe) && (
                         <EyeOff className="h-3 w-3 text-muted-foreground" aria-label="Hidden from recipe list" />
                       )}
                       {recipe.userId !== user?.uid && (
@@ -705,6 +717,7 @@ function KitchenToolRecipes({
   availableCategories: string[];
   uid?: string;
 }) {
+  const { isRecipeHidden } = useRecipes();
   const filtersActive = filterCount > 0 || sort !== "default";
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-8 space-y-6">
@@ -876,7 +889,7 @@ function KitchenToolRecipes({
                     {r.title}
                   </h3>
                   <div className="flex items-center gap-1.5 shrink-0 mt-1">
-                    {r.hiddenFromList && (
+                    {isRecipeHidden(r) && (
                       <EyeOff className="h-3.5 w-3.5 text-muted-foreground" aria-label="Hidden from recipe list" />
                     )}
                     {r.userId !== uid && (
@@ -927,7 +940,7 @@ function KitchenToolRecipes({
             >
               <div className="flex items-center gap-3 min-w-0">
                 {r.isFavorite && <Heart className="h-3 w-3 shrink-0 fill-primary text-primary" />}
-                {r.hiddenFromList && <EyeOff className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Hidden from recipe list" />}
+                {isRecipeHidden(r) && <EyeOff className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Hidden from recipe list" />}
                 {r.userId !== uid && <Users className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Shared with you" />}
                 <span className="kt-serif text-base font-medium truncate">{r.title}</span>
               </div>

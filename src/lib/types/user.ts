@@ -8,6 +8,12 @@ export interface UserProfile {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   preferences: UserPreferences;
+  /**
+   * Recipe ids this user has hidden from their own recipe library. Lives here
+   * rather than on the recipe so it also works for recipes shared by a
+   * household partner, which this user has no write access to.
+   */
+  hiddenRecipeIds?: string[];
 }
 
 export interface UserPreferences {

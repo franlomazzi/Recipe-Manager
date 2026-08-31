@@ -109,6 +109,12 @@ export interface ShoppingListState {
   individualPantryProcessedByWeek?: Record<string, boolean>;
   /** Per-week item keys the user has explicitly removed from the shopping list */
   exclusionsByWeek?: Record<string, string[]>;
+  /**
+   * Items the user has hidden from the shopping list *permanently* (every week),
+   * for entries that aren't really groceries — e.g. a "Saturday Cheat Meal"
+   * placeholder ingredient. Managed from Settings → Hidden Shopping Items.
+   */
+  hiddenItems?: HiddenShoppingItem[];
   /** ISO week keys (e.g. "2026-W21") the user has marked as done after shopping */
   closedWeeks?: string[];
   updatedAt?: Timestamp;
@@ -118,4 +124,14 @@ export interface CustomShoppingItem {
   id: string;
   name: string;
   checked: boolean;
+}
+
+/**
+ * An item permanently hidden from the shopping list. `key` matches the
+ * aggregated `ShoppingItem.key` (lowercased ingredient name, or a
+ * `pantry:`/`ipantry:` prefixed key); `name` is kept for display in Settings.
+ */
+export interface HiddenShoppingItem {
+  key: string;
+  name: string;
 }

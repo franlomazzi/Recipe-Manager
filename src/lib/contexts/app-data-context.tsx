@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { subscribeToRecipes } from "@/lib/firebase/firestore";
+import { subscribeHiddenRecipeIds } from "@/lib/firebase/user-recipe-prefs";
 import {
   subscribeToActiveInstance,
   subscribeToAdhocInstances,
@@ -27,6 +28,10 @@ import type { PlanInstance, PlanDay, PlanTemplate } from "@/lib/types/meal-plan"
 interface AppDataContextValue {
   recipes: Recipe[];
   recipesLoading: boolean;
+  /** Recipe ids the signed-in user has hidden from their own library. */
+  hiddenRecipeIds: Set<string>;
+  /** True when a recipe should stay out of the library list for this user. */
+  isRecipeHidden: (recipe: Recipe) => boolean;
   instance: PlanInstance | null;
   planLoading: boolean;
   todayIndices: { weekIndex: number; dayIndex: number } | null;
@@ -60,6 +65,25 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     });
     return unsubscribe;
   }, [user, partnerUid]);
+
+  // ── Personally hidden recipes ─────────────────────────────────────────────
+  // A recipe is out of the library either because its creator hid it
+  // (`hiddenFromList` on the recipe) or because this user hid it from their own
+  // list. The second path is the only one available for a partner's recipe.
+  const [hiddenRecipeIds, setHiddenRecipeIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!user) {
+      setHiddenRecipeIds(new Set());
+      return;
+    }
+    return subscribeHiddenRecipeIds(user.uid, setHiddenRecipeIds);
+  }, [user]);
+
+  const isRecipeHidden = useCallback(
+    (recipe: Recipe) => !!recipe.hiddenFromList || hiddenRecipeIds.has(recipe.id),
+    [hiddenRecipeIds]
+  );
 
   // ── Image preloading ──────────────────────────────────────────────────────
   const hasPreloaded = useRef(false);
@@ -168,6 +192,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const value: AppDataContextValue = {
     recipes,
     recipesLoading,
+    hiddenRecipeIds,
+    isRecipeHidden,
     instance,
     planLoading,
     todayIndices,
