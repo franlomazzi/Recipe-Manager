@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/contexts/auth-context";
 import { useHousehold } from "@/lib/contexts/household-context";
 import { getIndicesForDate } from "@/lib/firebase/meal-plans";
 import { useMealCombo } from "@/lib/hooks/use-meal-combo";
+import { useRecipes } from "@/lib/hooks/use-recipes";
 import {
   MEAL_CATEGORIES,
   type PlanInstance,
@@ -18,6 +19,29 @@ import {
 const CATEGORY_ORDER: Record<string, number> = Object.fromEntries(
   MEAL_CATEGORIES.map((c, i) => [c, i])
 );
+
+// A warm accent per category so each meal label pops against the black.
+const CATEGORY_ACCENT: Record<string, string> = {
+  Breakfast: "text-amber-300",
+  Lunch: "text-lime-300",
+  Dinner: "text-orange-300",
+  Snacks: "text-sky-300",
+};
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  Breakfast: "🍳",
+  Lunch: "🥗",
+  Dinner: "🍲",
+  Snacks: "🍎",
+};
+
+// Rough cut-off hour after which a category's meal is considered eaten.
+function isCategoryPast(category: string, hour: number): boolean {
+  if (category === "Breakfast") return hour >= 10;
+  if (category === "Lunch") return hour >= 14;
+  if (category === "Dinner") return hour >= 21;
+  return hour >= 23;
+}
 
 function dayMealsFromInstance(
   instance: PlanInstance | null,
@@ -156,17 +180,18 @@ export function Screensaver() {
   const myLabel = (user && household?.memberNames?.[user.uid]) || "You";
   const partnerLabel = partnerName || "Partner";
 
-  const nextMeal = useMemo(() => {
-    if (!myMeals.length) return null;
-    const hour = now.getHours();
-    const guessIdx = myMeals.findIndex((m) => {
-      if (m.category === "Breakfast") return hour < 10;
-      if (m.category === "Lunch") return hour < 14;
-      if (m.category === "Dinner") return hour < 21;
-      return hour < 23;
-    });
-    return guessIdx >= 0 ? myMeals[guessIdx] : null;
-  }, [myMeals, now]);
+  const hour = now.getHours();
+  const nextCategory = useMemo(() => {
+    const next = myMeals.find((m) => !isCategoryPast(m.category, hour));
+    return next?.category ?? null;
+  }, [myMeals, hour]);
+
+  const nextGroup = myGroups.find(([c]) => c === nextCategory) ?? null;
+  const otherGroups = myGroups.filter(([c]) => c !== nextCategory);
+
+  // Late at night the screen dims so it isn't glaring in a dark kitchen and
+  // draws less power; meals stay readable.
+  const nightDim = hour >= 22 || hour < 6;
 
   if (!enabled || !active) return null;
 
@@ -185,40 +210,46 @@ export function Screensaver() {
       <div
         style={{
           transform: `translate(${drift.x}px, ${drift.y}px)`,
-          transition: "transform 8s ease-in-out",
+          transition: "transform 8s ease-in-out, opacity 2s ease-in-out",
+          opacity: nightDim ? 0.5 : 1,
         }}
-        className="flex flex-col items-center gap-6 px-8 text-center"
+        className="flex flex-col items-center gap-4 px-8 text-center"
       >
-        <div className="text-[15vw] leading-none font-light tabular-nums tracking-tight">
+        <div className="text-[9vw] leading-none font-light tabular-nums tracking-tight">
           {formatTime(now)}
         </div>
-        <div className="text-2xl text-white/60">{formatDate(now)}</div>
+        <div className="text-xl text-white/60">{formatDate(now)}</div>
 
         {split ? (
           // Both people have meals: vertical divider with each person's meals.
-          <div className="mt-10 flex items-stretch justify-center gap-12">
-            <MealColumn label={myLabel} groups={myGroups} />
+          <div className="mt-6 flex items-stretch justify-center gap-10">
+            <MealColumn label={myLabel} groups={myGroups} hour={hour} />
             <div className="w-px self-stretch bg-white/15" />
-            <MealColumn label={partnerLabel} groups={partnerGroups} />
+            <MealColumn
+              label={partnerLabel}
+              groups={partnerGroups}
+              hour={hour}
+            />
           </div>
         ) : (
           <>
-            {nextMeal && (
-              <div className="mt-8 flex flex-col items-center gap-1">
-                <div className="text-sm uppercase tracking-widest text-white/40">
-                  Next: {nextMeal.category}
-                </div>
-                <div className="text-3xl text-white/90">{nextMeal.mealName}</div>
-              </div>
+            {nextGroup && (
+              <ScreensaverMealGroup
+                category={nextGroup[0]}
+                meals={nextGroup[1]}
+                variant="hero"
+              />
             )}
 
-            {myGroups.length > 0 && (
-              <div className="mt-6 flex flex-col gap-3">
-                {myGroups.map(([category, meals]) => (
+            {otherGroups.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-start justify-center gap-6">
+                {otherGroups.map(([category, meals]) => (
                   <ScreensaverMealGroup
                     key={category}
                     category={category}
                     meals={meals}
+                    variant="tile"
+                    past={isCategoryPast(category, hour)}
                   />
                 ))}
               </div>
@@ -226,7 +257,7 @@ export function Screensaver() {
           </>
         )}
 
-        <div className="mt-12 text-xs text-white/30">Tap to dismiss</div>
+        <div className="mt-8 text-xs text-white/30">Tap to dismiss</div>
       </div>
     </div>
   );
@@ -236,13 +267,17 @@ export function Screensaver() {
 function MealColumn({
   label,
   groups,
+  hour,
 }: {
   label: string;
   groups: [string, PlanMeal[]][];
+  hour: number;
 }) {
+  const nextCategory =
+    groups.find(([c]) => !isCategoryPast(c, hour))?.[0] ?? null;
   return (
-    <div className="flex min-w-[10rem] flex-col items-center gap-4 px-4">
-      <div className="text-base uppercase tracking-[0.2em] text-white/50">
+    <div className="flex min-w-[14rem] flex-col items-start gap-4 px-2">
+      <div className="self-center text-base uppercase tracking-[0.2em] text-white/50">
         {label}
       </div>
       <div className="flex flex-col gap-3">
@@ -251,6 +286,9 @@ function MealColumn({
             key={category}
             category={category}
             meals={meals}
+            variant="row"
+            highlight={category === nextCategory}
+            past={isCategoryPast(category, hour)}
           />
         ))}
       </div>
@@ -258,16 +296,27 @@ function MealColumn({
   );
 }
 
-// One category line on the screensaver. For a multi-recipe meal it shows the AI
-// combined photo + name when one has already been generated (no generation is
-// triggered here); otherwise it lists the component names.
+// One category on the screensaver, with its photo next to the name:
+// - "hero": the next meal, large photo so it catches the eye from across the room
+// - "tile": the rest of the day in a row of smaller photo tiles
+// - "row":  compact thumbnail + name, used in the two-person split view
+// Multi-recipe meals use the AI combined photo + name when one has already been
+// generated (no generation is triggered here); otherwise the first component
+// photo and the component names.
 function ScreensaverMealGroup({
   category,
   meals,
+  variant,
+  highlight = false,
+  past = false,
 }: {
   category: string;
   meals: PlanMeal[];
+  variant: "hero" | "tile" | "row";
+  highlight?: boolean;
+  past?: boolean;
 }) {
+  const { recipes } = useRecipes();
   const isCombo = meals.length >= 2;
   const { combo } = useMealCombo({
     mealIds: meals.map((m) => m.mealId),
@@ -277,29 +326,123 @@ function ScreensaverMealGroup({
     autoGenerate: false,
   });
 
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <span className="text-sm uppercase tracking-widest text-white/30">
-        {category}
-      </span>
-      {isCombo && combo?.imageURL && (
-        <img
-          src={combo.imageURL}
-          alt=""
-          className="mb-1 h-20 w-20 rounded-lg object-cover opacity-80"
+  // Plan snapshots strip mealPhoto, so fall back to the recipe's own photo.
+  const photo =
+    (isCombo ? combo?.imageURL : null) ??
+    meals
+      .map(
+        (m) =>
+          m.mealPhoto ?? recipes.find((r) => r.id === m.mealId)?.photoURL ?? null
+      )
+      .find(Boolean) ??
+    null;
+  const name = isCombo
+    ? combo?.name || meals.map((m) => m.mealName).join(" · ")
+    : meals[0]?.mealName ?? "";
+  const accent = CATEGORY_ACCENT[category] ?? "text-white/70";
+
+  if (variant === "hero") {
+    return (
+      <div className="mt-4 flex items-center gap-6 rounded-3xl bg-white/[0.06] p-4 pr-8 text-left">
+        <MealPhoto
+          src={photo}
+          category={category}
+          className="h-44 w-44 rounded-2xl md:h-56 md:w-56"
         />
-      )}
-      {isCombo ? (
-        <span className="text-base text-white/60">
-          {combo?.name || meals.map((m) => m.mealName).join(" · ")}
-        </span>
-      ) : (
-        meals.map((m, i) => (
-          <span key={`${m.mealId}-${i}`} className="text-base text-white/60">
-            {m.mealName}
+        <div className="flex max-w-[28rem] flex-col gap-2">
+          <span
+            className={`text-base font-semibold uppercase tracking-[0.25em] ${accent}`}
+          >
+            Next · {category}
           </span>
-        ))
-      )}
+          <span className="text-4xl font-medium leading-tight text-white md:text-5xl">
+            {name}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === "tile") {
+    return (
+      <div
+        className={`flex w-36 flex-col items-center gap-2 ${past ? "opacity-40" : ""}`}
+      >
+        <MealPhoto
+          src={photo}
+          category={category}
+          className="h-28 w-28 rounded-xl"
+        />
+        <span
+          className={`text-xs font-semibold uppercase tracking-widest ${accent}`}
+        >
+          {category}
+        </span>
+        <span className="line-clamp-2 text-base leading-snug text-white/85">
+          {name}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-4 rounded-2xl p-2 pr-4 text-left ${
+        highlight ? "bg-white/[0.08]" : ""
+      } ${past ? "opacity-40" : ""}`}
+    >
+      <MealPhoto
+        src={photo}
+        category={category}
+        className={highlight ? "h-24 w-24 rounded-xl" : "h-16 w-16 rounded-lg"}
+      />
+      <div className="flex max-w-[16rem] flex-col gap-0.5">
+        <span
+          className={`text-xs font-semibold uppercase tracking-widest ${accent}`}
+        >
+          {highlight ? `Next · ${category}` : category}
+        </span>
+        <span
+          className={`line-clamp-2 leading-snug ${
+            highlight ? "text-2xl text-white" : "text-base text-white/85"
+          }`}
+        >
+          {name}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Meal photo, or a category emoji on a soft tile when there is no photo (or it
+// fails to load).
+function MealPhoto({
+  src,
+  category,
+  className,
+}: {
+  src: string | null;
+  category: string;
+  className: string;
+}) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+
+  if (src && src !== failedSrc) {
+    return (
+      <img
+        src={src}
+        alt=""
+        decoding="async"
+        onError={() => setFailedSrc(src)}
+        className={`shrink-0 object-cover ${className}`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`flex shrink-0 items-center justify-center bg-white/10 text-4xl ${className}`}
+    >
+      {CATEGORY_EMOJI[category] ?? "🍽️"}
     </div>
   );
 }
